@@ -21,6 +21,18 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
+// Helper to force Google Drive download link
+const getDownloadUrl = (url: string) => {
+  if (!url) return '';
+  if (url.includes('drive.google.com') && url.includes('/view')) {
+    const match = url.match(/\/d\/([^/]+)/);
+    if (match && match[1]) {
+      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+    }
+  }
+  return url;
+};
+
 const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [viewDate, setViewDate] = useState(new Date());
@@ -319,7 +331,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                              return (
                                <a 
                                  key={att.id} 
-                                 href={att.url} 
+                                 href={getDownloadUrl(att.url)} 
                                  target="_blank" 
                                  rel="noopener noreferrer"
                                  download // Hint browser to download

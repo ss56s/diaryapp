@@ -23,6 +23,20 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
+// Helper to force Google Drive download link
+const getDownloadUrl = (url: string) => {
+  if (!url) return '';
+  // Check if it is a Google Drive View Link
+  if (url.includes('drive.google.com') && url.includes('/view')) {
+    const match = url.match(/\/d\/([^/]+)/);
+    if (match && match[1]) {
+      // Convert to export=download format
+      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+    }
+  }
+  return url;
+};
+
 const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, onImageClick }) => {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [items, setItems] = useState<TimelineItem[]>([]);
@@ -112,6 +126,41 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
       setIsSyncing(false);
     }
   };
+
+  // Keyboard/Viewport Logic (Retained as per existing file state)
+  const [isKeyboardDetected, setIsKeyboardDetected] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
+  const [initialWindowHeight, setInitialWindowHeight] = useState(0);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    setInitialWindowHeight(window.innerHeight);
+    if (!window.visualViewport) return;
+    const handleResize = () => {
+      const inputBar = document.getElementById('sticky-input-bar');
+      if (!inputBar) return;
+      const visualViewport = window.visualViewport!;
+      const safeBottom = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
+      setIsKeyboardDetected(safeBottom > 50 || (initialWindowHeight - window.innerHeight > 150));
+      if (safeBottom > 0) {
+        inputBar.style.bottom = '0px';
+        inputBar.style.transform = `translateY(-${safeBottom}px)`;
+      } else {
+        inputBar.style.bottom = '';
+        inputBar.style.transform = 'translateY(0)';
+      }
+    };
+    window.visualViewport.addEventListener('resize', handleResize);
+    window.visualViewport.addEventListener('scroll', handleResize);
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+        window.visualViewport.removeEventListener('scroll', handleResize);
+      }
+    };
+  }, [initialWindowHeight]);
+
+  const showKeyboardLayout = isKeyboardDetected || isInputFocused;
 
   const handleSend = async () => {
     if (isProcessingFile || isFuture || isSending || (!inputText.trim() && attachments.length === 0)) return;
@@ -260,7 +309,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                 return (
                                   <a 
                                     key={att.id} 
-                                    href={att.url} 
+                                    href={getDownloadUrl(att.url)} 
                                     target="_blank" 
                                     rel="noopener noreferrer"
                                     download // Hint to browser to download
@@ -292,7 +341,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
         )}
       </div>
 
-      <div id="sticky-input-bar" className={`fixed left-4 right-4 z-40 max-w-lg mx-auto transition-all duration-100 ease-out ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} bottom-[100px]`}>
+      <div id="sticky-input-bar" className={`fixed left-4 right-4 z-40 max-w-lg mx-auto transition-all duration-100 ease-out ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} ${showKeyboardLayout ? 'bottom-[150px] pb-2' : 'bottom-[100px]'}`}>
         <div id="loading-badge" className={`absolute -top-8 left-4 bg-black text-white text-xs py-1 px-3 rounded-full shadow-md z-50 ${isProcessingFile ? 'block' : 'hidden'}`}>
            <i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i> 文件处理中...
         </div>
@@ -326,7 +375,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                    })}
                 </div>
              )}
-             <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={isFuture ? "无法在未来添加日志" : `记录${activeCatConfig.label}点滴...`} className="w-full bg-transparent border-none outline-none text-[15px] text-textMain placeholder-slate-400 resize-none py-2.5 max-h-32" rows={1} onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height='auto'; t.style.height=t.scrollHeight+'px'; }} />
+             <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={isFuture ? "无法在未来添加日志" : `记录${activeCatConfig.label}点滴...`} className="w-full bg-transparent border-none outline-none text-[15px] text-textMain placeholder-slate-400 resize-none py-2.5 max-h-32" rows={1} onFocus={() => setIsInputFocused(true)} onBlur={() => setIsInputFocused(false)} onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height='auto'; t.style.height=t.scrollHeight+'px'; }} />
           </div>
 
           <div className="relative flex-shrink-0">

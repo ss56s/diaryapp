@@ -22,6 +22,18 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
+// Helper to force Google Drive download link
+const getDownloadUrl = (url: string) => {
+  if (!url) return '';
+  if (url.includes('drive.google.com') && url.includes('/view')) {
+    const match = url.match(/\/d\/([^/]+)/);
+    if (match && match[1]) {
+      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+    }
+  }
+  return url;
+};
+
 const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [viewMode, setViewMode] = useState<'week' | 'month'>('week');
@@ -314,7 +326,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                      return (
                                        <a 
                                          key={att.id}
-                                         href={att.url}
+                                         href={getDownloadUrl(att.url)}
                                          target="_blank"
                                          rel="noopener noreferrer"
                                          download

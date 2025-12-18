@@ -13,7 +13,6 @@ interface HistoryViewProps {
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
-  // Check specific formats BEFORE generic 'document'
   if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
   if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
   if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('tar') || mimeType.includes('rar')) return 'fa-file-zipper text-amber-500';
@@ -22,7 +21,6 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
-// Helper to generate download URL using internal proxy
 const getDownloadUrl = (url: string) => {
   if (!url) return '';
   try {
@@ -59,6 +57,9 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   
+  // New State for download feedback
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
   // Touch tracking
   const touchStartY = useRef<number | null>(null);
 
@@ -106,10 +107,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
 
   const confirmDelete = async () => {
     if (itemToDelete) {
-      // 1. Delete locally (mark as pending)
       await deleteTimelineItem(itemToDelete);
-      
-      // 2. Optimistic remote delete
       const item = items.find(i => i.id === itemToDelete);
       const deleteDate = item ? item.date : selectedDate;
 
@@ -124,7 +122,17 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
     }
   };
 
-  // --- Gesture Logic ---
+  const handleDownloadClick = (e: React.MouseEvent, id: string) => {
+    if (downloadingId) {
+      e.preventDefault();
+      return;
+    }
+    setDownloadingId(id);
+    setTimeout(() => {
+      setDownloadingId(null);
+    }, 3000);
+  };
+
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
   };
@@ -135,15 +143,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
     const touchEndY = e.changedTouches[0].clientY;
     const diff = touchEndY - touchStartY.current;
     
-    // Threshold for swipe (30px)
     if (diff < -30) {
-      // Swipe Up -> Collapse
       setIsCalendarExpanded(false);
     } else if (diff > 30) {
-      // Swipe Down -> Expand
       setIsCalendarExpanded(true);
     } else if (Math.abs(diff) < 5) {
-      // Tap -> Toggle (optional fallback)
       setIsCalendarExpanded(!isCalendarExpanded);
     }
     
@@ -155,7 +159,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
       {/* Calendar Header Container */}
       <div className="flex-shrink-0 bg-surface shadow-soft rounded-b-[2.5rem] z-20 relative flex flex-col transition-all duration-300">
         
-        {/* Header (Always Visible) */}
+        {/* Header */}
         <div className="pt-12 pb-2 px-6 flex items-center justify-between relative z-30">
           <div className="relative">
             <h2 className="text-2xl font-bold text-textMain tracking-tight flex items-center gap-2">
@@ -235,7 +239,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
           </div>
         </div>
 
-        {/* Drag Handle with Touch Events */}
+        {/* Drag Handle */}
         <div 
           onTouchStart={handleTouchStart}
           onTouchEnd={handleTouchEnd}
@@ -341,17 +345,22 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                                />
                              );
                            } else {
+                             const isDownloading = downloadingId === att.id;
                              return (
                                <a 
                                  key={att.id} 
                                  href={getDownloadUrl(att.url)} 
-                                 // Remove target="_blank"
                                  download 
-                                 className="w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm hover:bg-slate-100 transition-colors relative"
+                                 onClick={(e) => handleDownloadClick(e, att.id)}
+                                 className={`w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors relative cursor-pointer ${isDownloading ? 'bg-slate-100 cursor-wait' : 'hover:bg-slate-100'}`}
                                >
-                                  <div className="absolute top-1 right-1 text-[8px] text-slate-300"><i className="fa-solid fa-download"></i></div>
+                                  <div className="absolute top-1 right-1 text-[8px] text-slate-300">
+                                    {isDownloading ? <i className="fa-solid fa-circle-notch fa-spin text-primary"></i> : <i className="fa-solid fa-download"></i>}
+                                  </div>
                                   <i className={`fa-solid ${getFileIcon(att.type)} text-xl`}></i>
-                                  <span className="text-[9px] text-textMuted font-bold uppercase truncate w-full text-center px-1">{att.name.split('.').pop()}</span>
+                                  <span className="text-[9px] text-textMuted font-bold uppercase truncate w-full text-center px-1">
+                                    {att.name.split('.').pop()}
+                                  </span>
                                </a>
                              );
                            }

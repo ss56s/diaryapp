@@ -16,7 +16,6 @@ interface StatsViewProps {
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
-  // Check specific formats BEFORE generic 'document'
   if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
   if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
   if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-zipper text-amber-500';
@@ -24,7 +23,6 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
-// Helper to generate download URL using internal proxy
 const getDownloadUrl = (url: string) => {
   if (!url) return '';
   try {
@@ -60,6 +58,9 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
   const [aiLoading, setAiLoading] = useState(false);
   const [currentReport, setCurrentReport] = useState<AIReport | null>(null);
   
+  // New State for download feedback
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null);
   const dateInputRef = useRef<HTMLInputElement>(null);
@@ -68,7 +69,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
     setItems(getAllTimelineItems());
   }, []);
 
-  // --- Date Math Helpers ---
   const toDateKey = (d: Date) => {
      const year = d.getFullYear();
      const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -79,7 +79,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
   const getWeekStart = (date: Date) => {
     const d = new Date(date);
     const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1); 
     d.setDate(diff);
     d.setHours(0,0,0,0);
     return d;
@@ -104,14 +104,12 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
   const startDateStr = toDateKey(startDate);
   const endDateStr = toDateKey(endDate);
 
-  // --- Filter Items by Date ---
   const filteredItems = useMemo(() => {
     return items
       .filter(i => i.date >= startDateStr && i.date <= endDateStr)
       .sort((a, b) => a.timestamp - b.timestamp);
   }, [items, startDateStr, endDateStr]);
 
-  // --- Filter Items by Search Term ---
   const searchResults = useMemo(() => {
     if (!searchTerm.trim()) return [];
     const lowerTerm = searchTerm.toLowerCase();
@@ -123,25 +121,18 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
 
   const isSearching = searchTerm.trim().length > 0;
 
-  // --- Check for existing AI Report ---
   useEffect(() => {
     const report = getLatestReportForRange(startDateStr, endDateStr);
     setCurrentReport(report || null);
   }, [startDateStr, endDateStr, items]);
 
-  // --- AI Handler ---
   const handleAnalyze = async () => {
     if (filteredItems.length === 0) {
       alert("当前时间段没有记录可供分析。");
       return;
     }
-
     setAiLoading(true);
-    
-    // Call Gemini Service
     const summaryData: WeeklySummary = await generateWeeklySummary(filteredItems);
-    
-    // Create new report object
     const newReport: AIReport = {
       id: Math.random().toString(36).substring(7),
       startDate: startDateStr,
@@ -149,11 +140,20 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
       timestamp: Date.now(),
       data: summaryData
     };
-
-    // Save persistence
     await saveAIReport(newReport);
     setCurrentReport(newReport);
     setAiLoading(false);
+  };
+
+  const handleDownloadClick = (e: React.MouseEvent, id: string) => {
+    if (downloadingId) {
+      e.preventDefault();
+      return;
+    }
+    setDownloadingId(id);
+    setTimeout(() => {
+      setDownloadingId(null);
+    }, 3000);
   };
 
   const chartData = useMemo(() => {
@@ -196,9 +196,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
   }, [startDate, endDate, viewMode]);
 
   useEffect(() => {
-    // If searching, do not render chart
     if (isSearching) return;
-
     if (!chartRef.current || !window.Chart) return;
     if (chartInstance.current) chartInstance.current.destroy();
 
@@ -238,11 +236,8 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
 
   return (
     <div className="flex flex-col h-screen bg-background text-textMain">
-      {/* Header */}
       <div className="flex-shrink-0 bg-surface shadow-soft rounded-b-3xl z-20 px-6 pt-12 pb-6 animate-slide-up">
         <h1 className="text-2xl font-bold mb-4">数据洞察</h1>
-        
-        {/* Search Bar */}
         <div className="relative mb-4">
            <input 
              type="text" 
@@ -261,8 +256,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
              </button>
            )}
         </div>
-
-        {/* Date Controls */}
         <div className="flex flex-col gap-4">
            <div className="bg-slate-100 p-1 rounded-xl flex self-center">
               <button onClick={() => setViewMode('week')} className={`px-6 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'week' ? 'bg-white shadow-sm text-primary' : 'text-textMuted'}`}>周视图</button>
@@ -279,17 +272,13 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
         </div>
       </div>
 
-      {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-5 pb-32 space-y-6">
-         
          {isSearching ? (
-            // --- Search Results View ---
             <div className="space-y-4 animate-fade-in">
                <div className="flex items-center justify-between px-1">
                  <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider">搜索结果</h3>
                  <span className="text-xs text-slate-400 font-medium">{searchResults.length} 条记录</span>
                </div>
-               
                {searchResults.length === 0 ? (
                  <div className="flex flex-col items-center justify-center py-10 text-textMuted">
                     <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
@@ -303,17 +292,13 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                    const catConfig = item.category ? CATEGORIES[item.category] : null;
                    return (
                      <div key={item.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 flex gap-3 animate-slide-up">
-                       {/* Date Box */}
                        <div className="flex flex-col items-center w-14 flex-shrink-0 pt-0.5 border-r border-slate-50 pr-2">
                           <span className="text-[10px] font-bold text-slate-400">{item.date.substring(5)}</span>
                           <span className="text-xs font-bold text-textMain font-mono">{item.timeLabel}</span>
                        </div>
-                       
-                       {/* Content */}
                        <div className="flex-1 min-w-0">
                           <div className="flex flex-col gap-1.5">
                             <p className="text-textMain text-sm leading-relaxed line-clamp-3">{item.content}</p>
-                            
                             <div className="flex items-center justify-between mt-1">
                                {catConfig && (
                                   <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full ${catConfig.bgSoft}`}>
@@ -322,7 +307,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                   </span>
                                )}
                             </div>
-
                             {item.attachments.length > 0 && (
                                <div className="flex gap-2 overflow-x-auto pb-1 mt-1">
                                  {item.attachments.map(att => {
@@ -337,17 +321,20 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                        />
                                      );
                                    } else {
+                                     const isDownloading = downloadingId === att.id;
                                      return (
                                        <a 
                                          key={att.id}
                                          href={getDownloadUrl(att.url)}
-                                         // Remove target="_blank"
                                          download
-                                         className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm relative"
+                                         onClick={(e) => handleDownloadClick(e, att.id)}
+                                         className={`w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm relative cursor-pointer ${isDownloading ? 'bg-slate-100 cursor-wait' : 'hover:bg-slate-100'}`}
                                        >
-                                          <div className="absolute top-1 right-1 text-[8px] text-slate-300"><i className="fa-solid fa-download"></i></div>
+                                          <div className="absolute top-1 right-1 text-[8px] text-slate-300">
+                                            {isDownloading ? <i className="fa-solid fa-circle-notch fa-spin text-primary"></i> : <i className="fa-solid fa-download"></i>}
+                                          </div>
                                           <i className={`fa-solid ${getFileIcon(att.type)} text-xs`}></i>
-                                          <span className="text-[8px] text-textMuted font-bold uppercase">{att.name.split('.').pop()}</span>
+                                          <span className="text-[8px] text-textMuted font-bold uppercase truncate w-full text-center px-0.5">{att.name.split('.').pop()}</span>
                                        </a>
                                      );
                                    }
@@ -362,15 +349,11 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                )}
             </div>
          ) : (
-            // --- Default Stats Dashboard ---
             <>
-              {/* Chart */}
               <div className="bg-surface rounded-3xl p-5 shadow-sm border border-slate-100 animate-slide-up" style={{animationDelay: '0.1s'}}>
                   <h3 className="text-xs font-bold text-textMuted uppercase tracking-wider mb-4">趋势分析</h3>
                   <div className="h-56 relative w-full"><canvas ref={chartRef}></canvas></div>
               </div>
-
-              {/* Simplified Summary Cards */}
               <div className="grid grid-cols-3 gap-3">
                   {(['life', 'work', 'study'] as CategoryType[]).map((catKey, idx) => {
                     const cat = CATEGORIES[catKey];
@@ -386,12 +369,8 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                     )
                   })}
               </div>
-
-              {/* AI Analysis Module */}
               <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-3xl p-6 text-white shadow-xl shadow-slate-400/20 animate-slide-up relative overflow-hidden" style={{animationDelay: '0.5s'}}>
-                  {/* Background effects */}
                   <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[50px] pointer-events-none"></div>
-                  
                   <div className="relative z-10">
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
@@ -407,7 +386,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                         <button onClick={handleAnalyze} className="text-xs text-slate-400 hover:text-white underline">重新分析</button>
                       )}
                     </div>
-
                     {!currentReport && !aiLoading && (
                       <div className="text-center py-6">
                         <p className="text-sm text-slate-300 mb-6 px-4 leading-relaxed">
@@ -422,21 +400,18 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                         </button>
                       </div>
                     )}
-
                     {aiLoading && (
                       <div className="py-10 flex flex-col items-center justify-center text-slate-300 gap-4">
                           <i className="fa-solid fa-circle-notch fa-spin text-3xl text-indigo-400"></i>
                           <span className="text-xs font-mono animate-pulse">Gemini 正在阅读您的日志...</span>
                       </div>
                     )}
-
                     {currentReport && !aiLoading && (
                       <div className="space-y-4 animate-fade-in bg-white/5 rounded-2xl p-4 border border-white/10">
                           <div>
                             <h4 className="text-xs font-bold text-indigo-300 mb-1 uppercase tracking-wider">周期总结</h4>
                             <p className="text-sm text-slate-200 leading-relaxed">{currentReport.data.summary}</p>
                           </div>
-                          
                           <div>
                             <h4 className="text-xs font-bold text-emerald-300 mb-1 uppercase tracking-wider">主要成就</h4>
                             <ul className="space-y-1">
@@ -448,7 +423,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                 ))}
                             </ul>
                           </div>
-
                           <div>
                             <h4 className="text-xs font-bold text-blue-300 mb-1 uppercase tracking-wider">AI 建议</h4>
                             <div className="bg-indigo-500/10 border border-indigo-500/20 rounded-xl p-3 flex gap-3">
@@ -456,7 +430,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                 <p className="text-xs text-indigo-100">{currentReport.data.suggestions}</p>
                             </div>
                           </div>
-                          
                           <div className="text-right">
                             <span className="text-[10px] text-slate-500">生成于 {new Date(currentReport.timestamp).toLocaleTimeString()}</span>
                           </div>

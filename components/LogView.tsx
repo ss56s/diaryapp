@@ -25,9 +25,8 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
   const [isCategoryMenuOpen, setIsCategoryMenuOpen] = useState(false);
   const [isUploadMenuOpen, setIsUploadMenuOpen] = useState(false);
 
-  const [isKeyboardDetected, setIsKeyboardDetected] = useState(false);
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
-  const [initialWindowHeight, setInitialWindowHeight] = useState(0);
 
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -59,19 +58,11 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
     try {
       // 1. Process Pending Deletes First (Clean up Drive)
-      // This prevents "pull" from bringing back things we just deleted if we are online
       const pendingDeletes = getPendingDeletes();
       if (pendingDeletes.length > 0) {
         console.log(`[Sync] Processing ${pendingDeletes.length} deletions...`);
         for (const deleteId of pendingDeletes) {
-           // We pass selectedDate for optimization, though deleting usually requires finding the file.
-           // Since we don't store the date of deleted items in the simple array, we try current date 
-           // or we rely on the server implementation finding it.
-           // NOTE: Ideally 'pendingDeletes' should be objects {id, date}. 
-           // For now, we attempt to delete. If it's in a different date folder, this simple sync might fail to find it
-           // unless we upgrade storageService. But let's try.
            const res = await deleteLogAction(selectedDate, deleteId);
-           // If successful or not found, we clear it from pending
            if (res.success || res.message === '删除失败') { 
              removePendingDelete(deleteId);
            }
@@ -117,36 +108,25 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     }
   };
 
-  // Keyboard/Viewport Logic
+  // Optimized Keyboard Logic
+  // We rely on 'interactive-widget=resizes-content' in meta tag for position,
+  // we only track state to adjust padding/margins.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    setInitialWindowHeight(window.innerHeight);
-    if (!window.visualViewport) return;
-    const handleResize = () => {
-      const inputBar = document.getElementById('sticky-input-bar');
-      if (!inputBar) return;
-      const visualViewport = window.visualViewport!;
-      const safeBottom = Math.max(0, window.innerHeight - visualViewport.height - visualViewport.offsetTop);
-      setIsKeyboardDetected(safeBottom > 50 || (initialWindowHeight - window.innerHeight > 150));
-      if (safeBottom > 0) {
-        inputBar.style.bottom = '0px';
-        inputBar.style.transform = `translateY(-${safeBottom}px)`;
-      } else {
-        inputBar.style.bottom = '';
-        inputBar.style.transform = 'translateY(0)';
-      }
-    };
-    window.visualViewport.addEventListener('resize', handleResize);
-    window.visualViewport.addEventListener('scroll', handleResize);
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', handleResize);
-        window.visualViewport.removeEventListener('scroll', handleResize);
-      }
-    };
-  }, [initialWindowHeight]);
 
-  const showKeyboardLayout = isKeyboardDetected || isInputFocused;
+    const handleResize = () => {
+      // Simple heuristic: if window height shrinks significantly, keyboard is likely open
+      // This is more robust than visualViewport calculations for just toggling UI states
+      const isHeightShrunk = window.innerHeight < window.screen.height * 0.75;
+      setIsKeyboardOpen(isHeightShrunk);
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Determine if we should show the "Compact/Keyboard" Layout
+  const showKeyboardLayout = isKeyboardOpen || isInputFocused;
 
   const handleSend = async () => {
     if (isProcessingFile || isFuture || isSending || (!inputText.trim() && attachments.length === 0)) return;
@@ -169,6 +149,11 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     setInputText('');
     setAttachments([]);
     
+    // Auto scroll to bottom after sending
+    setTimeout(() => {
+       scrollEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, 100);
+    
     syncLogAction(newItem).then(res => {
       if (res.success && res.syncedItem) {
         saveTimelineItem(res.syncedItem).then(() => refreshItems());
@@ -182,15 +167,10 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
   const confirmDelete = async () => {
     if (itemToDelete) {
-      // 1. Delete locally (mark as pending delete)
       await deleteTimelineItem(itemToDelete);
-      
-      // 2. Try to delete remotely immediately if possible
-      // (This is best effort. If it fails, the sync logic will catch it later via getPendingDeletes)
       deleteLogAction(selectedDate, itemToDelete).then(res => {
          if (res.success) removePendingDelete(itemToDelete);
       });
-      
       refreshItems();
       setItemToDelete(null);
     }
@@ -216,7 +196,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
   const activeCatConfig = CATEGORIES[currentCategory];
 
   return (
-    <div className="flex flex-col h-screen bg-background text-textMain relative">
+    <div className="flex flex-col h-screen bg-background text-textMain relative overflow-hidden">
       <CalendarStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} />
 
       <button
@@ -231,7 +211,10 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
         <i className="fa-solid fa-arrows-rotate text-lg"></i>
       </button>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4 pb-40">
+      {/* Main List Area - Adjusted padding-bottom to prevent content from being hidden behind input bar */}
+      <div 
+        className={`flex-1 overflow-y-auto px-5 py-4 transition-all duration-300 ${showKeyboardLayout ? 'pb-24' : 'pb-40'}`}
+      >
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[60vh] text-textMuted/60">
             <div className="w-20 h-20 bg-white rounded-3xl shadow-soft flex items-center justify-center mb-6">
@@ -306,13 +289,38 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
         )}
       </div>
 
-      <div id="sticky-input-bar" className={`fixed left-4 right-4 z-40 max-w-lg mx-auto transition-all duration-100 ease-out ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} ${showKeyboardLayout ? 'bottom-[150px] pb-2' : 'bottom-[100px]'}`}>
-        <div id="loading-badge" className={`absolute -top-8 left-4 bg-black text-white text-xs py-1 px-3 rounded-full shadow-md z-50 ${isProcessingFile ? 'block' : 'hidden'}`}>📸 图片处理中...</div>
+      {/* 
+        Optimized Input Bar 
+        - Uses position:fixed and bottom-0.
+        - Relies on 'interactive-widget=resizes-content' to auto-move with keyboard.
+        - Toggles margin/padding based on keyboard state for aesthetics.
+      */}
+      <div 
+        id="sticky-input-bar" 
+        className={`fixed left-0 right-0 z-40 transition-all duration-300 ease-[cubic-bezier(0.2,0,0,1)] 
+          ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} 
+          ${showKeyboardLayout 
+              ? 'bottom-0 bg-white/90 backdrop-blur-md pt-3 pb-2 border-t border-slate-100' // Keyboard Open: Flush to bottom, with background
+              : 'bottom-[90px] px-4' // Keyboard Closed: Floating above Nav
+          }
+        `}
+      >
+        <div id="loading-badge" className={`absolute -top-10 left-4 bg-black/80 text-white text-xs py-1.5 px-3 rounded-full shadow-lg z-50 backdrop-blur-sm ${isProcessingFile ? 'block animate-pulse' : 'hidden'}`}>
+           <i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i> 图片处理中...
+        </div>
+        
         <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileUpload} />
         <input type="file" ref={fileInputRef} className="hidden" accept="*/*" onChange={handleFileUpload} />
 
-        <div className={`glass rounded-[2rem] p-2 shadow-soft flex items-end gap-2 transition-all duration-300 border ${activeCatConfig.borderColor} ${activeCatConfig.ringColor} focus-within:ring-2 ring-offset-2`}>
-          <div className="relative flex-shrink-0">
+        <div className={`
+           relative flex items-end gap-2 transition-all duration-300 
+           ${showKeyboardLayout 
+              ? 'px-3 max-w-full' // Full width when typing
+              : 'glass rounded-[2rem] p-2 shadow-soft border max-w-lg mx-auto ' + activeCatConfig.borderColor + ' ' + activeCatConfig.ringColor + ' focus-within:ring-2 ring-offset-2'
+           }
+        `}>
+          {/* Action Buttons (Left) */}
+          <div className="relative flex-shrink-0 mb-0.5">
              <div className={`absolute bottom-full left-0 mb-3 flex flex-col gap-2 transition-all duration-300 origin-bottom-left ${isUploadMenuOpen ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-90 pointer-events-none'}`}>
                  <button onClick={() => { setIsUploadMenuOpen(false); cameraInputRef.current?.click(); }} className="flex items-center gap-2 pl-3 pr-4 py-2 rounded-full shadow-lg bg-white border border-slate-100"><div className="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center shadow-md"><i className="fa-solid fa-camera text-xs"></i></div><span className="text-xs font-bold text-textMain">拍照</span></button>
                  <button onClick={() => { setIsUploadMenuOpen(false); fileInputRef.current?.click(); }} className="flex items-center gap-2 pl-3 pr-4 py-2 rounded-full shadow-lg bg-white border border-slate-100"><div className="w-8 h-8 rounded-full bg-slate-500 text-white flex items-center justify-center shadow-md"><i className="fa-regular fa-folder-open text-xs"></i></div><span className="text-xs font-bold text-textMain">文件</span></button>
@@ -320,27 +328,42 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
              <button onClick={() => !isProcessingFile && setIsUploadMenuOpen(!isUploadMenuOpen)} className={`w-10 h-10 rounded-full ${activeCatConfig.bgSoft} ${activeCatConfig.textClass} flex items-center justify-center active:scale-95 ${isUploadMenuOpen ? 'rotate-45' : ''}`}><i className={`fa-solid ${isUploadMenuOpen ? 'fa-plus' : 'fa-paperclip'}`}></i></button>
           </div>
 
-          <div className="flex-grow flex flex-col justify-center min-h-[44px]">
+          {/* Text Input Area */}
+          <div className={`flex-grow flex flex-col justify-center min-h-[44px] ${showKeyboardLayout ? 'bg-slate-100 rounded-2xl px-2' : ''}`}>
              {attachments.length > 0 && (
-                <div className="flex gap-2 mb-1 overflow-x-auto pb-1 pl-1">
+                <div className="flex gap-2 mb-1 overflow-x-auto pb-1 pl-1 pt-1.5">
                    {attachments.map(att => (
-                      <div key={att.id} className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-slate-200">
+                      <div key={att.id} className="relative w-12 h-12 rounded-lg overflow-hidden flex-shrink-0 border border-slate-200">
                         <img src={att.url} className="w-full h-full object-cover" />
                         <button onClick={() => setAttachments(prev => prev.filter(p => p.id !== att.id))} className="absolute inset-0 bg-black/40 text-white text-[10px] flex items-center justify-center"><i className="fa-solid fa-xmark"></i></button>
                       </div>
                    ))}
                 </div>
              )}
-             <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={isFuture ? "无法在未来添加日志" : `记录${activeCatConfig.label}点滴...`} className="w-full bg-transparent border-none outline-none text-[15px] text-textMain placeholder-slate-400 resize-none py-2.5 max-h-32" rows={1} onFocus={() => setIsInputFocused(true)} onBlur={() => setIsInputFocused(false)} onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height='auto'; t.style.height=t.scrollHeight+'px'; }} />
+             <textarea 
+               value={inputText} 
+               onChange={(e) => setInputText(e.target.value)} 
+               placeholder={isFuture ? "无法在未来添加日志" : `记录${activeCatConfig.label}点滴...`} 
+               className={`w-full bg-transparent border-none outline-none text-[15px] text-textMain placeholder-slate-400 resize-none py-2.5 max-h-32 ${showKeyboardLayout ? 'px-1' : ''}`} 
+               rows={1} 
+               onFocus={() => setIsInputFocused(true)} 
+               onBlur={() => setIsInputFocused(false)} 
+               onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height='auto'; t.style.height=t.scrollHeight+'px'; }} 
+             />
           </div>
 
-          <div className="relative flex-shrink-0">
+          {/* Action Buttons (Right) */}
+          <div className="relative flex-shrink-0 mb-0.5">
              <div className={`absolute bottom-full right-0 mb-6 flex flex-col gap-2 transition-all duration-300 origin-bottom ${isCategoryMenuOpen ? 'opacity-100 scale-100' : 'opacity-0 scale-90 pointer-events-none'}`}>
                  {Object.values(CATEGORIES).map((cat) => (
                   <button key={cat.id} onClick={() => { onCategoryChange(cat.id); setIsCategoryMenuOpen(false); }} className="flex items-center gap-2 pr-3 pl-2 py-1.5 rounded-full shadow-lg bg-white border border-slate-100 whitespace-nowrap justify-end"><span className="text-xs font-bold text-textMain">{cat.label}</span><div className={`w-8 h-8 rounded-full ${cat.color} text-white flex items-center justify-center shadow-md`}><i className={`fa-solid ${cat.icon} text-xs`}></i></div></button>
                 ))}
              </div>
-             <button onClick={() => setIsCategoryMenuOpen(!isCategoryMenuOpen)} className={`absolute bottom-full right-1.5 mb-2 w-8 h-8 rounded-full shadow-lg z-10 flex items-center justify-center transition-all border-2 border-white ${isCategoryMenuOpen ? 'rotate-45 bg-slate-200 text-slate-500' : `${activeCatConfig.color} text-white`}`}>{isCategoryMenuOpen ? <i className="fa-solid fa-plus"></i> : <i className={`fa-solid ${activeCatConfig.icon} text-xs`}></i>}</button>
+             
+             {!showKeyboardLayout && (
+                <button onClick={() => setIsCategoryMenuOpen(!isCategoryMenuOpen)} className={`absolute bottom-full right-1.5 mb-2 w-8 h-8 rounded-full shadow-lg z-10 flex items-center justify-center transition-all border-2 border-white ${isCategoryMenuOpen ? 'rotate-45 bg-slate-200 text-slate-500' : `${activeCatConfig.color} text-white`}`}>{isCategoryMenuOpen ? <i className="fa-solid fa-plus"></i> : <i className={`fa-solid ${activeCatConfig.icon} text-xs`}></i>}</button>
+             )}
+
              <button onClick={handleSend} disabled={isFuture || isProcessingFile || isSending || (!inputText.trim() && attachments.length === 0)} className={`w-11 h-11 rounded-full flex items-center justify-center transition-all shadow-md ${(!isFuture && !isProcessingFile && (inputText.trim() || attachments.length > 0)) ? `${activeCatConfig.color} text-white` : 'bg-slate-200 text-slate-400'}`}>{isSending ? <i className="fa-solid fa-spinner fa-spin text-sm"></i> : <i className="fa-solid fa-paper-plane text-sm translate-x-[1px] translate-y-[1px]"></i>}</button>
           </div>
         </div>

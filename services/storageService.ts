@@ -4,16 +4,31 @@ import { TimelineItem, Attachment, AIReport } from '../types';
 const STORAGE_KEY = 'dailycraft_timeline';
 const REPORTS_KEY = 'dailycraft_ai_reports';
 
-// --- Timeline Items ---
-
 export const saveTimelineItem = async (item: TimelineItem): Promise<void> => {
-  // Simulate network delay
-  await new Promise(resolve => setTimeout(resolve, 300));
-  
   const allItems = getAllTimelineItems();
-  const newItems = [...allItems, item];
+  const existingIndex = allItems.findIndex(i => i.id === item.id);
+  
+  let newItems;
+  if (existingIndex > -1) {
+    newItems = [...allItems];
+    newItems[existingIndex] = item;
+  } else {
+    newItems = [...allItems, item];
+  }
   
   localStorage.setItem(STORAGE_KEY, JSON.stringify(newItems));
+};
+
+export const upsertTimelineItems = (items: TimelineItem[]) => {
+  const allItems = getAllTimelineItems();
+  const itemMap = new Map(allItems.map(i => [i.id, i]));
+  
+  items.forEach(item => {
+    // Only overwrite if remote item exists (naive merge)
+    itemMap.set(item.id, { ...item, syncStatus: 'synced' });
+  });
+  
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(itemMap.values())));
 };
 
 export const deleteTimelineItem = async (itemId: string): Promise<void> => {
@@ -37,7 +52,6 @@ export const getItemsByDate = (date: string): TimelineItem[] => {
 export const uploadFileMock = async (file: File): Promise<Attachment> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    
     reader.onload = () => {
       if (reader.result) {
         resolve({
@@ -47,26 +61,18 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
           url: reader.result as string 
         });
       } else {
-        reject(new Error("File processing failed: No result"));
+        reject(new Error("File processing failed"));
       }
     };
-    
-    reader.onerror = () => {
-      reject(new Error("File reading failed"));
-    };
-    
+    reader.onerror = () => reject(new Error("File reading failed"));
     reader.readAsDataURL(file);
   });
 };
 
-// --- AI Reports (Simulating "AI_Reports" Sheet) ---
-
 export const saveAIReport = async (report: AIReport): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate write latency
   const reports = getAIReports();
-  // Remove old reports for the same date range to avoid duplicates (optional logic)
   const filtered = reports.filter(r => r.startDate !== report.startDate || r.endDate !== report.endDate);
-  const newReports = [report, ...filtered]; // Prepend new report
+  const newReports = [report, ...filtered];
   localStorage.setItem(REPORTS_KEY, JSON.stringify(newReports));
 };
 

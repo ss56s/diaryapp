@@ -1,15 +1,15 @@
+
 'use server';
 
 import { cookies } from 'next/headers';
 import { encrypt, getSession } from '../lib/auth';
-import { uploadLogToDrive } from '../lib/drive';
+import { uploadLogToDrive, fetchLogsByDate } from '../lib/drive';
 import { TimelineItem } from '../types';
 
 export async function loginAction(formData: FormData) {
   const username = formData.get('username') as string;
   const password = formData.get('password') as string;
 
-  // Fix: Explicitly type the users object to allow string indexing
   let users: Record<string, string> = {};
   try {
     users = JSON.parse(process.env.APP_USERS || '{}');
@@ -41,7 +41,18 @@ export async function syncLogAction(logItem: TimelineItem) {
     return { success: true };
   } catch (error: any) {
     console.error('Google Drive Sync Error:', error);
-    // Fixed: Cast error to 'any' to access message property safely in TypeScript
     return { success: false, message: error?.message || '上传失败' };
+  }
+}
+
+export async function pullLogsFromDriveAction(date: string) {
+  const session = await getSession();
+  if (!session) return { success: false, message: '未授权' };
+
+  try {
+    const items = await fetchLogsByDate(session.username, date);
+    return { success: true, items };
+  } catch (error: any) {
+    return { success: false, message: error?.message || '拉取失败' };
   }
 }

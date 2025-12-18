@@ -16,28 +16,31 @@ interface StatsViewProps {
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
-  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
+  // Check specific formats BEFORE generic 'document'
+  if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
   if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
   if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-zipper text-amber-500';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
   return 'fa-file text-slate-400';
 };
 
-// Helper to force Google Drive download link
+// Helper to generate download URL using internal proxy
 const getDownloadUrl = (url: string) => {
   if (!url) return '';
   try {
+    let fileId = null;
     if (url.includes('drive.google.com')) {
       const pathMatch = url.match(/\/d\/([^/]+)/);
-      if (pathMatch && pathMatch[1]) {
-        return `https://drive.google.com/uc?export=download&id=${pathMatch[1]}`;
-      }
-      if (url.includes('id=')) {
+      if (pathMatch && pathMatch[1]) fileId = pathMatch[1];
+      
+      if (!fileId && url.includes('id=')) {
         const urlObj = new URL(url);
-        const id = urlObj.searchParams.get('id');
-        if (id) {
-          return `https://drive.google.com/uc?export=download&id=${id}`;
-        }
+        fileId = urlObj.searchParams.get('id');
       }
+    }
+
+    if (fileId) {
+        return `/api/proxy-download?fileId=${fileId}`;
     }
   } catch (e) {
     console.error("URL parse error", e);
@@ -338,7 +341,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                        <a 
                                          key={att.id}
                                          href={getDownloadUrl(att.url)}
-                                         target="_blank" // Restore target="_blank"
+                                         // Remove target="_blank"
                                          download
                                          className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm relative"
                                        >

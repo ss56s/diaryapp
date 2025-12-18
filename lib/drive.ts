@@ -4,7 +4,8 @@ import { TimelineItem } from '../types';
 import { Buffer } from 'buffer';
 import { Readable } from 'stream';
 
-const getOAuth2Client = () => {
+// Export this function to reuse in API routes
+export const getOAuth2Client = () => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;

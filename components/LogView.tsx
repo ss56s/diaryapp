@@ -15,33 +15,36 @@ interface LogViewProps {
 // Helper for File Icons
 const getFileIcon = (mimeType: string) => {
   if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
-  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
-  if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
+  // Check specific formats BEFORE generic 'document' which Word claims
   if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
+  if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
   if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('tar') || mimeType.includes('rar')) return 'fa-file-zipper text-amber-500';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
   if (mimeType.includes('text') || mimeType.includes('txt')) return 'fa-file-lines text-slate-500';
   return 'fa-file text-slate-400';
 };
 
-// Helper to force Google Drive download link
+// Helper to generate download URL
 const getDownloadUrl = (url: string) => {
   if (!url) return '';
   try {
     // Check if it looks like a Google Drive URL
+    let fileId = null;
     if (url.includes('drive.google.com')) {
-      // Case 1: /file/d/ID/view or /file/d/ID/preview
+      // Case 1: /file/d/ID/view
       const pathMatch = url.match(/\/d\/([^/]+)/);
-      if (pathMatch && pathMatch[1]) {
-        return `https://drive.google.com/uc?export=download&id=${pathMatch[1]}`;
-      }
+      if (pathMatch && pathMatch[1]) fileId = pathMatch[1];
+      
       // Case 2: id=ID query param
-      if (url.includes('id=')) {
+      if (!fileId && url.includes('id=')) {
         const urlObj = new URL(url);
-        const id = urlObj.searchParams.get('id');
-        if (id) {
-          return `https://drive.google.com/uc?export=download&id=${id}`;
-        }
+        fileId = urlObj.searchParams.get('id');
       }
+    }
+
+    // Use our internal proxy for speed and to avoid redirects/auth issues
+    if (fileId) {
+        return `/api/proxy-download?fileId=${fileId}`;
     }
   } catch (e) {
     console.error("URL parse error", e);
@@ -323,8 +326,8 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                   <a 
                                     key={att.id} 
                                     href={getDownloadUrl(att.url)} 
-                                    target="_blank" // Prevent app from navigating away
-                                    rel="noopener noreferrer" 
+                                    // Remove target="_blank" so the browser stays in context 
+                                    // while the API returns "Content-Disposition: attachment"
                                     download 
                                     className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer group"
                                   >

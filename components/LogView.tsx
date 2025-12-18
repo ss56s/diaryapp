@@ -23,28 +23,20 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
-// Helper to generate download URL
-const getDownloadUrl = (url: string) => {
-  if (!url) return '';
-  try {
-    let fileId = null;
-    if (url.includes('drive.google.com')) {
-      const pathMatch = url.match(/\/d\/([^/]+)/);
-      if (pathMatch && pathMatch[1]) fileId = pathMatch[1];
-      
-      if (!fileId && url.includes('id=')) {
-        const urlObj = new URL(url);
-        fileId = urlObj.searchParams.get('id');
-      }
-    }
-
-    if (fileId) {
-        return `/api/proxy-download?fileId=${fileId}`;
-    }
-  } catch (e) {
-    console.error("URL parse error", e);
+// Helper to generate download URL (Attachment)
+const getDownloadUrl = (att: Attachment) => {
+  if (att.driveId) {
+      return `/api/proxy-download?fileId=${att.driveId}`;
   }
-  return url;
+  return att.url;
+};
+
+// Helper to generate Image Display URL (Inline)
+const getImageUrl = (att: Attachment) => {
+  if (att.driveId) {
+      return `/api/proxy-download?fileId=${att.driveId}&inline=true`;
+  }
+  return att.url;
 };
 
 const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, onImageClick }) => {
@@ -229,8 +221,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
       return;
     }
     setDownloadingId(id);
-    // Reset state after 3 seconds to allow user to click again if needed,
-    // assuming the browser's download manager has taken over by then.
+    // Reset state after 3 seconds
     setTimeout(() => {
       setDownloadingId(null);
     }, 3000);
@@ -303,28 +294,33 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                           <div className="mt-3 grid grid-cols-2 gap-2">
                             {item.attachments.map(att => {
                               const isImg = att.type.startsWith('image/');
+                              const imgUrl = getImageUrl(att);
+                              
                               if (isImg) {
                                 return (
-                                  <div key={att.id} className="relative aspect-video rounded-xl overflow-hidden shadow-sm cursor-zoom-in active:scale-95 transition-transform" onClick={() => onImageClick(att.url)}>
+                                  <div key={att.id} className="relative aspect-video rounded-xl overflow-hidden shadow-sm cursor-zoom-in active:scale-95 transition-transform" onClick={() => onImageClick(imgUrl)}>
                                     <img 
-                                      src={att.url} 
+                                      src={imgUrl}
                                       className="w-full h-full object-cover" 
                                       alt="attachment" 
+                                      loading="lazy"
                                       onError={(e) => {
                                           const t = e.target as HTMLImageElement;
                                           t.style.display='none';
-                                          t.parentElement!.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-slate-50 text-xs text-slate-400 p-2 text-center"><i class="fa-solid fa-image mr-1"></i>图片已同步</div>`;
+                                          t.parentElement!.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-slate-50 text-xs text-slate-400 p-2 text-center"><i class="fa-solid fa-image mr-1"></i>加载失败</div>`;
                                       }}
                                     />
                                   </div>
                                 );
                               } else {
                                 const isDownloading = downloadingId === att.id;
+                                const downloadLink = getDownloadUrl(att);
+
                                 return (
                                   <a 
                                     key={att.id} 
-                                    href={getDownloadUrl(att.url)} 
-                                    download
+                                    href={downloadLink} 
+                                    download={!att.driveId} // Only use 'download' attribute if not using proxy (proxy handles disposition)
                                     onClick={(e) => handleDownloadClick(e, att.id)}
                                     className={`flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 transition-colors cursor-pointer group ${isDownloading ? 'bg-slate-100 cursor-wait' : 'hover:bg-slate-100'}`}
                                   >
@@ -384,7 +380,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                       return (
                         <div key={att.id} className={`relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-slate-200 ${!isImg ? 'bg-slate-50 flex items-center justify-center' : ''}`}>
                           {isImg ? (
-                            <img src={att.url} className="w-full h-full object-cover" />
+                            <img src={getImageUrl(att)} className="w-full h-full object-cover" />
                           ) : (
                             <i className={`fa-solid ${getFileIcon(att.type)} text-xs`}></i>
                           )}

@@ -13,6 +13,7 @@ export async function GET(req: NextRequest) {
   // 2. Parse Query
   const { searchParams } = new URL(req.url);
   const fileId = searchParams.get('fileId');
+  const inline = searchParams.get('inline'); // New param to control Content-Disposition
 
   if (!fileId) {
     return new NextResponse('Missing fileId', { status: 400 });
@@ -35,20 +36,30 @@ export async function GET(req: NextRequest) {
 
     // 5. Create Response
     const headers = new Headers();
-    headers.set('Content-Type', meta.data.mimeType || 'application/octet-stream');
+    const mimeType = meta.data.mimeType || 'application/octet-stream';
+    headers.set('Content-Type', mimeType);
     
-    // Force download with correct filename
+    // Add Cache-Control for images to improve performance and reduce API calls
+    if (mimeType.startsWith('image/')) {
+        headers.set('Cache-Control', 'private, max-age=3600, stale-while-revalidate=86400');
+    }
+
     const filename = encodeURIComponent(meta.data.name || 'download');
-    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+
+    // Handle Inline vs Attachment
+    if (inline === 'true') {
+        headers.set('Content-Disposition', 'inline');
+    } else {
+        headers.set('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    }
     
     if (meta.data.size) {
         headers.set('Content-Length', meta.data.size);
     }
 
     // Convert Node stream to Web stream for Next.js
-    const stream = response.data as any; // Cast because googleapis types vs web streams mismatch
+    const stream = response.data as any; 
     
-    // Create a ReadableStream from the Node stream
     const webStream = new ReadableStream({
         start(controller) {
             stream.on('data', (chunk: any) => controller.enqueue(chunk));

@@ -1,3 +1,4 @@
+
 export interface TimelineItem {
   id: string;
   date: string; // YYYY-MM-DD
@@ -13,7 +14,8 @@ export interface Attachment {
   id: string;
   name: string;
   type: string;
-  url: string; 
+  url: string;
+  driveId?: string; // ID for Google Drive files to enable proxy access
 }
 
 export enum AppTab {

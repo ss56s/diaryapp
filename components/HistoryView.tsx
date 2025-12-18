@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getAllTimelineItems, deleteTimelineItem, removePendingDelete } from '../services/storageService';
 import { deleteLogAction } from '../app/actions';
 import ConfirmModal from './ConfirmModal';
-import { TimelineItem, CategoryType, CATEGORIES } from '../types';
+import { TimelineItem, CategoryType, CATEGORIES, Attachment } from '../types';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -21,27 +21,18 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
-const getDownloadUrl = (url: string) => {
-  if (!url) return '';
-  try {
-    let fileId = null;
-    if (url.includes('drive.google.com')) {
-      const pathMatch = url.match(/\/d\/([^/]+)/);
-      if (pathMatch && pathMatch[1]) fileId = pathMatch[1];
-      
-      if (!fileId && url.includes('id=')) {
-        const urlObj = new URL(url);
-        fileId = urlObj.searchParams.get('id');
-      }
-    }
-
-    if (fileId) {
-        return `/api/proxy-download?fileId=${fileId}`;
-    }
-  } catch (e) {
-    console.error("URL parse error", e);
+const getDownloadUrl = (att: Attachment) => {
+  if (att.driveId) {
+      return `/api/proxy-download?fileId=${att.driveId}`;
   }
-  return url;
+  return att.url;
+};
+
+const getImageUrl = (att: Attachment) => {
+  if (att.driveId) {
+      return `/api/proxy-download?fileId=${att.driveId}&inline=true`;
+  }
+  return att.url;
 };
 
 const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
@@ -335,22 +326,26 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                        <div className="flex gap-2 overflow-x-auto pb-2 mt-2">
                          {item.attachments.map(att => {
                            const isImg = att.type.startsWith('image/');
+                           const imgUrl = getImageUrl(att);
+
                            if (isImg) {
                              return (
                                <img 
                                   key={att.id} 
-                                  src={att.url} 
+                                  src={imgUrl} 
                                   className="w-16 h-16 rounded-xl object-cover shadow-sm border border-slate-50 cursor-zoom-in active:scale-95 transition-transform" 
-                                  onClick={() => onImageClick(att.url)}
+                                  onClick={() => onImageClick(imgUrl)}
                                />
                              );
                            } else {
                              const isDownloading = downloadingId === att.id;
+                             const downloadLink = getDownloadUrl(att);
+
                              return (
                                <a 
                                  key={att.id} 
-                                 href={getDownloadUrl(att.url)} 
-                                 download 
+                                 href={downloadLink} 
+                                 download={!att.driveId}
                                  onClick={(e) => handleDownloadClick(e, att.id)}
                                  className={`w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors relative cursor-pointer ${isDownloading ? 'bg-slate-100 cursor-wait' : 'hover:bg-slate-100'}`}
                                >

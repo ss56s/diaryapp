@@ -1,7 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { getOAuth2Client } from '@/lib/drive';
+import { getAccessToken } from '@/lib/drive';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,61 +23,49 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const drive = getOAuth2Client();
-
-    let filename: string | null | undefined = clientFilename;
-    let mimeType: string | null | undefined = clientMimeType;
-    let size: string | null | undefined = undefined;
-
-    // Only fetch metadata if client didn't provide it
-    if (!filename) {
-        try {
-            const meta = await drive.files.get({
-                fileId: fileId,
-                fields: 'name, mimeType, size'
-            });
-            filename = meta.data.name || null;
-            mimeType = meta.data.mimeType || null;
-            size = meta.data.size || undefined;
-        } catch (e) {
-            console.error("Failed to fetch metadata, proceeding with defaults", e);
-        }
+    // 3. Get raw access token for direct fetch
+    // Using native fetch instead of googleapis library avoids double-buffering 
+    // and stream serialization overhead in Node.js/Edge runtime.
+    const accessToken = await getAccessToken();
+    if (!accessToken) {
+        throw new Error("Failed to obtain access token");
     }
 
-    // 3. Get File Stream
-    const response = await drive.files.get(
-      { fileId: fileId, alt: 'media' },
-      { responseType: 'stream' }
-    );
-
-    // 4. Create Response Headers
-    const headers = new Headers();
-    headers.set('Content-Type', mimeType || 'application/octet-stream');
-    
-    // Force download with correct filename (RFC 5987)
-    const encodedFilename = encodeURIComponent(filename || 'download');
-    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
-    
-    if (size) {
-        headers.set('Content-Length', String(size));
-    }
-
-    // 5. Stream Handling (Convert Node Stream to Web Stream)
-    const stream = response.data as any; 
-    
-    const webStream = new ReadableStream({
-        start(controller) {
-            stream.on('data', (chunk: any) => controller.enqueue(chunk));
-            stream.on('end', () => controller.close());
-            stream.on('error', (err: any) => controller.error(err));
+    // 4. Direct Fetch from Google API
+    // We request the 'media' alt directly.
+    const googleRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`
         }
     });
 
-    return new NextResponse(webStream, { headers });
+    if (!googleRes.ok) {
+        const errorText = await googleRes.text();
+        console.error("Upstream error:", googleRes.status, errorText);
+        throw new Error(`Google Drive API error: ${googleRes.status}`);
+    }
+
+    // 5. Pipe the upstream stream directly to the client
+    // This allows the runtime (Node/Edge) to handle piping at a lower level (C++),
+    // which is significantly faster (MB/s) than JS-based piping (KB/s).
+    const headers = new Headers();
+    headers.set('Content-Type', clientMimeType || googleRes.headers.get('Content-Type') || 'application/octet-stream');
+    
+    // Check upstream length if available
+    const contentLength = googleRes.headers.get('Content-Length');
+    if (contentLength) {
+        headers.set('Content-Length', contentLength);
+    }
+    
+    // Force download with correct filename
+    const encodedFilename = encodeURIComponent(clientFilename || 'download');
+    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
+
+    return new NextResponse(googleRes.body, { headers });
 
   } catch (error: any) {
     console.error('Proxy Download Error:', error);
-    // Return text response on error so browser displays it
     return new NextResponse(`Download Failed: ${error.message}`, { status: 500 });
   }
 }

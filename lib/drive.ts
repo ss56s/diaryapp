@@ -4,8 +4,8 @@ import { TimelineItem } from '../types';
 import { Buffer } from 'buffer';
 import { Readable } from 'stream';
 
-// Export this function to reuse in API routes
-export const getOAuth2Client = () => {
+// Helper to get OAuth2 Client (Internal)
+const createOAuth2Client = () => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
   const refreshToken = process.env.GOOGLE_REFRESH_TOKEN;
@@ -17,7 +17,20 @@ export const getOAuth2Client = () => {
 
   const oauth2Client = new google.auth.OAuth2(clientId, clientSecret);
   oauth2Client.setCredentials({ refresh_token: refreshToken });
-  return google.drive({ version: 'v3', auth: oauth2Client });
+  return oauth2Client;
+};
+
+// Export this function to reuse in API routes (Legacy support)
+export const getOAuth2Client = () => {
+  const auth = createOAuth2Client();
+  return google.drive({ version: 'v3', auth });
+};
+
+// NEW: Export Access Token getter for high-performance direct fetch
+export const getAccessToken = async () => {
+  const auth = createOAuth2Client();
+  const res = await auth.getAccessToken();
+  return res.token;
 };
 
 const findOrCreateFolder = async (drive: any, parentId: string, folderName: string) => {

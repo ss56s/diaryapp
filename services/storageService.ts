@@ -92,17 +92,66 @@ export const getItemsByDate = (date: string): TimelineItem[] => {
 export const uploadFileMock = async (file: File): Promise<Attachment> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => {
-      if (reader.result) {
+    const img = new Image();
+    const canvas = document.createElement('canvas');
+    
+    // 1. Read file as Data URL
+    reader.onload = (e) => {
+      if (!e.target?.result) {
+        reject(new Error("File read error"));
+        return;
+      }
+      img.src = e.target.result as string;
+      
+      // 2. On image load, compress it via Canvas
+      img.onload = () => {
+        const MAX_WIDTH = 1280; // Reasonable size for mobile view
+        const MAX_HEIGHT = 1280;
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        
+        if (!ctx) {
+           // Fallback if canvas context is missing (rare)
+           resolve({
+             id: Math.random().toString(36).substring(7),
+             name: file.name,
+             type: file.type,
+             url: img.src
+           });
+           return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // 3. Export as JPEG with 0.7 quality
+        // This usually reduces a 5MB PNG to <300KB JPEG
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+
         resolve({
           id: Math.random().toString(36).substring(7),
-          name: file.name,
-          type: file.type,
-          url: reader.result as string 
+          name: file.name.replace(/\.[^/.]+$/, "") + ".jpg",
+          type: 'image/jpeg',
+          url: compressedDataUrl
         });
-      } else {
-        reject(new Error("File processing failed"));
-      }
+      };
+
+      img.onerror = () => reject(new Error("Image processing failed"));
     };
     reader.onerror = () => reject(new Error("File reading failed"));
     reader.readAsDataURL(file);

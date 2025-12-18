@@ -62,27 +62,43 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
       const pullRes = await pullLogsFromDriveAction(selectedDate);
       if (pullRes.success && pullRes.items) {
         upsertTimelineItems(pullRes.items);
+      } else if (!pullRes.success && pullRes.message) {
+         console.warn("Pull failed:", pullRes.message);
+         // Optional: alert("云端拉取失败: " + pullRes.message);
       }
 
       // 2. Push pending logs
       const currentItems = getItemsByDate(selectedDate);
       const pendingItems = currentItems.filter(i => i.syncStatus !== 'synced');
       
+      let failCount = 0;
+      let lastError = "";
+
       for (const item of pendingItems) {
         const res = await syncLogAction(item);
         if (res.success) {
           await saveTimelineItem({ ...item, syncStatus: 'synced' });
+        } else {
+          failCount++;
+          lastError = res.message || "未知错误";
+          await saveTimelineItem({ ...item, syncStatus: 'error' }); // Mark as error locally
         }
       }
+      
+      if (failCount > 0) {
+        alert(`同步失败 (${failCount}条): ${lastError}\n请检查网络或Google Drive授权配置。`);
+      }
+
       refreshItems();
-    } catch (err) {
+    } catch (err: any) {
       console.error("Sync error:", err);
+      alert("同步发生严重错误: " + err.message);
     } finally {
       setIsSyncing(false);
     }
   };
 
-  // Keyboard/Viewport Logic (same as original)
+  // Keyboard/Viewport Logic
   useEffect(() => {
     if (typeof window === 'undefined') return;
     setInitialWindowHeight(window.innerHeight);
@@ -134,10 +150,12 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     setInputText('');
     setAttachments([]);
     
-    // Auto-sync after saving
+    // Auto-sync
     syncLogAction(newItem).then(res => {
       if (res.success) {
         saveTimelineItem({ ...newItem, syncStatus: 'synced' }).then(() => refreshItems());
+      } else {
+        saveTimelineItem({ ...newItem, syncStatus: 'error' }).then(() => refreshItems());
       }
     });
     
@@ -175,13 +193,17 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     <div className="flex flex-col h-screen bg-background text-textMain relative">
       <CalendarStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} />
 
-      {/* Manual Sync Button */}
+      {/* Manual Sync Button - Updated Positioning and Visibility */}
       <button
         onClick={handleFullSync}
-        className={`fixed right-6 top-32 z-50 w-12 h-12 rounded-full bg-white shadow-soft border border-slate-100 flex items-center justify-center transition-all active:scale-95 ${isSyncing ? 'animate-spin text-primary' : 'text-textMuted hover:text-primary'}`}
+        className={`fixed right-5 top-28 z-50 w-12 h-12 rounded-full shadow-lg border-2 border-white flex items-center justify-center transition-all active:scale-95 ${
+          isSyncing 
+            ? 'bg-white text-primary animate-spin' 
+            : 'bg-primary text-white hover:bg-primaryDark'
+        }`}
         title="同步到云端"
       >
-        <i className="fa-solid fa-arrows-rotate"></i>
+        <i className="fa-solid fa-arrows-rotate text-lg"></i>
       </button>
 
       {/* Feed Area */}
@@ -198,6 +220,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
             {items.map((item) => {
               const catConfig = item.category ? CATEGORIES[item.category] : null;
               const isSynced = item.syncStatus === 'synced';
+              const isError = item.syncStatus === 'error';
               
               return (
                 <div key={item.id} className="relative animate-slide-up">
@@ -214,8 +237,15 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                       )}
                     </div>
                     {/* Sync Status Traffic Light */}
-                    <div className="flex items-center gap-1.5 pr-1">
-                       <span className={`w-2 h-2 rounded-full shadow-sm ${isSynced ? 'bg-emerald-500' : 'bg-red-400'}`} title={isSynced ? "已同步" : "未同步"}></span>
+                    <div className="flex items-center gap-1.5 pr-1" title={isSynced ? "已同步" : isError ? "同步失败(点击重试)" : "等待同步"}>
+                       <button 
+                         onClick={() => isError ? handleFullSync() : null}
+                         className={`w-2.5 h-2.5 rounded-full shadow-sm transition-colors ${
+                           isSynced ? 'bg-emerald-500' : 
+                           isError ? 'bg-red-500 animate-pulse cursor-pointer' : 
+                           'bg-amber-400'
+                         }`}
+                       ></button>
                     </div>
                   </div>
 

@@ -91,18 +91,23 @@ export const getItemsByDate = (date: string): TimelineItem[] => {
 
 export const uploadFileMock = async (file: File): Promise<Attachment> => {
   return new Promise((resolve, reject) => {
-    // Rule: If file is < 3MB, use original (support gif, png transparent).
-    // If file is > 3MB, compress to avoid crashing browser/network.
-    const USE_ORIGINAL_LIMIT = 3 * 1024 * 1024; // 3MB
+    const isImage = file.type.startsWith('image/');
+    
+    // Rule: We want "Original Format" as much as possible.
+    // 1. If NOT image, always keep original.
+    // 2. If Image < 10MB, keep original.
+    // 3. Only compress if Image > 10MB (to prevent crashing browsers/server limits).
+    const USE_ORIGINAL_LIMIT = 10 * 1024 * 1024; // 10MB
 
-    if (file.size <= USE_ORIGINAL_LIMIT) {
+    if (!isImage || file.size <= USE_ORIGINAL_LIMIT) {
+      console.log(`[Storage] Using original file: ${file.name} (${(file.size/1024/1024).toFixed(2)}MB)`);
       const reader = new FileReader();
       reader.onload = (e) => {
         if (!e.target?.result) return reject(new Error("File read error"));
         resolve({
           id: Math.random().toString(36).substring(7),
           name: file.name,
-          type: file.type,
+          type: file.type || 'application/octet-stream',
           url: e.target.result as string
         });
       };
@@ -111,7 +116,8 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
       return;
     }
 
-    // Heavy file: Compress
+    console.log(`[Storage] Compressing heavy image: ${file.name} (${(file.size/1024/1024).toFixed(2)}MB)`);
+    // Heavy Image: Compress
     const reader = new FileReader();
     const img = new Image();
     const canvas = document.createElement('canvas');
@@ -124,8 +130,8 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
       img.src = e.target.result as string;
       
       img.onload = () => {
-        const MAX_WIDTH = 1920; // High Quality
-        const MAX_HEIGHT = 1920;
+        const MAX_WIDTH = 2560; // Increased Quality
+        const MAX_HEIGHT = 2560;
         let width = img.width;
         let height = img.height;
 
@@ -158,7 +164,7 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
         ctx.drawImage(img, 0, 0, width, height);
 
         // Export as High Quality JPEG
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.90);
 
         resolve({
           id: Math.random().toString(36).substring(7),

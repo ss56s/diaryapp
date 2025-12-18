@@ -2,6 +2,7 @@
 import { google } from 'googleapis';
 import { TimelineItem } from '../types';
 import { Buffer } from 'buffer';
+import { Readable } from 'stream';
 
 const getOAuth2Client = () => {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -54,6 +55,40 @@ const findLogFileId = async (drive: any, username: string, date: string, logId: 
   }
 };
 
+// Helper: Map MIME types to extensions
+const getExtensionFromMime = (mime: string, originalName?: string): string => {
+  if (originalName && originalName.includes('.')) {
+    return originalName.split('.').pop() || 'bin';
+  }
+  
+  const map: Record<string, string> = {
+    'image/jpeg': 'jpg',
+    'image/jpg': 'jpg',
+    'image/png': 'png',
+    'image/gif': 'gif',
+    'image/webp': 'webp',
+    'image/heic': 'heic',
+    'application/pdf': 'pdf',
+    'application/msword': 'doc',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/vnd.ms-excel': 'xls',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'application/zip': 'zip',
+    'application/x-zip-compressed': 'zip',
+    'application/x-7z-compressed': '7z',
+    'application/x-rar-compressed': 'rar'
+  };
+
+  // Fuzzy match
+  for (const key in map) {
+    if (mime.includes(key)) return map[key];
+  }
+
+  return 'bin';
+};
+
 export const deleteLogFromDrive = async (username: string, date: string, logId: string) => {
   const drive = getOAuth2Client();
   const fileId = await findLogFileId(drive, username, date, logId);
@@ -86,82 +121,75 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
   const dayId = await findOrCreateFolder(drive, monthId, day);
 
   // Deep copy attachments to avoid mutating original during loop
-  // We will build a 'clean' list that contains URLs, not Base64
   const cleanAttachments = [];
 
   if (log.attachments && log.attachments.length > 0) {
-    const { Readable } = await import('stream');
-
     for (const att of log.attachments) {
       // Check if it's a new upload (Base64 Data URL)
       if (att.url.startsWith('data:')) {
         try {
-          console.log(`[Sync] Extracting and uploading image file for attachment ${att.id}`);
+          console.log(`[Sync] Processing file upload for attachment ${att.id} (${att.name})...`);
           
           // 1. Parse Base64
-          const matches = att.url.match(/^data:([A-Za-z-+\/]+);base64,(.+)$/);
+          const matches = att.url.match(/^data:([^;]+);base64,(.+)$/);
           if (!matches || matches.length !== 3) {
-            console.warn("Invalid base64 string, skipping upload");
-            cleanAttachments.push(att); // Fallback
+            console.warn("Invalid base64 string, skipping upload and keeping base64");
+            cleanAttachments.push(att); 
             continue;
           }
 
           const mimeType = matches[1];
           const base64Data = matches[2];
           const buffer = Buffer.from(base64Data, 'base64');
-          
-          // 2. Determine extension
-          let ext = 'jpg';
-          if (mimeType.includes('png')) ext = 'png';
-          else if (mimeType.includes('gif')) ext = 'gif';
-          else if (mimeType.includes('webp')) ext = 'webp';
+          const ext = getExtensionFromMime(mimeType, att.name);
+          const fileName = `${log.timestamp}_${att.id}.${ext}`; // Clean filename
 
-          const fileName = `img_${log.timestamp}_${att.id}.${ext}`;
-
-          // 3. Create Stream
+          // 2. Create Readable Stream from Buffer
           const stream = new Readable();
           stream.push(buffer);
-          stream.push(null);
+          stream.push(null); // Signal end of stream
 
-          // 4. Upload File to Drive
+          // 3. Upload File to Drive
+          // IMPORTANT: media.body must be the stream
           const res = await drive.files.create({
             requestBody: { 
               name: fileName, 
               parents: [dayId],
-              description: `Attachment for log ${log.id}`
+              description: `Attachment for log ${log.id} (${att.name})`
             },
-            media: { mimeType: mimeType, body: stream },
-            fields: 'id, thumbnailLink, webViewLink' 
+            media: { 
+              mimeType: mimeType, 
+              body: stream 
+            },
+            fields: 'id, thumbnailLink, webViewLink, webContentLink' 
           });
           
           if(res.data.id) {
-            // 5. Construct Google Drive Direct Link
-            // 'thumbnailLink' is usually accessible. We hack the size parameter '=s' to get high res.
-            let finalUrl = res.data.thumbnailLink;
-            if (finalUrl) {
-                // Replace default size (usually s220) with s2000 (2000px width) or higher
-                finalUrl = finalUrl.replace(/=s\d+.*$/, '=s3000');
-            } else {
-                finalUrl = res.data.webViewLink;
+            // 4. Determine Link
+            // webViewLink is the preview link (good for PDF/Docs).
+            // thumbnailLink is good for images.
+            // webContentLink is for direct download.
+            let finalUrl = res.data.webViewLink; // Default to preview
+            
+            // Optimization for Images: Use high-res thumbnail
+            if (mimeType.startsWith('image/') && res.data.thumbnailLink) {
+                finalUrl = res.data.thumbnailLink.replace(/=s\d+.*$/, '=s3000');
             }
 
-            console.log(`[Sync] Image uploaded. Drive ID: ${res.data.id}`);
+            console.log(`[Sync] File uploaded successfully. Name: ${fileName}, ID: ${res.data.id}`);
 
-            // 6. Push CLEAN attachment object (No Base64)
             cleanAttachments.push({ 
               ...att, 
               driveId: res.data.id, 
-              url: finalUrl || att.url // If link generation fails, might fall back, but ideally URL
+              url: finalUrl || att.url // Prefer Drive Link
             });
           } else {
-            console.error("Upload returned no ID");
-            // If upload fails, we unfortunately have to keep the original or drop it. 
-            // Let's keep original to prevent data loss, but log error.
+            console.error("Upload returned no ID, falling back to base64");
             cleanAttachments.push(att);
           }
-        } catch (imgErr) {
-          console.error("Image upload failed", imgErr);
-          cleanAttachments.push(att); 
+        } catch (fileErr: any) {
+          console.error(`[Sync] File upload failed for ${att.name}:`, fileErr.message);
+          cleanAttachments.push(att); // Fallback: keep original base64
         }
       } else {
         // Already a remote URL (previously synced)
@@ -171,7 +199,8 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
   }
 
   // Create the object to save to JSON file. 
-  // CRITICAL: This object uses 'cleanAttachments', so the JSON file on Drive will NOT contain Base64.
+  // CRITICAL: This object uses 'cleanAttachments', so the JSON file on Drive will NOT contain Base64 
+  // if the upload was successful.
   const logToSave = { 
     ...log, 
     attachments: cleanAttachments, 
@@ -200,7 +229,6 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
     });
   }
 
-  // Return the cleaned object so the frontend can update LocalStorage
   return logToSave;
 };
 
@@ -214,6 +242,7 @@ export const fetchLogsByDate = async (username: string, date: string): Promise<T
     const userId = await findOrCreateFolder(drive, diaryId, username);
     const [year, month, day] = date.split('-');
     
+    // Helper to gracefully handle missing folders
     const findFolderId = async (pId: string, name: string) => {
       const q = `'${pId}' in parents and name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
       const res = await drive.files.list({ q, fields: 'files(id)' });

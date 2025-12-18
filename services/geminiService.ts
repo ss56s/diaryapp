@@ -7,6 +7,7 @@ const getAiClient = () => {
     console.warn("API Key is missing. Mocking AI response.");
     return null;
   }
+  // Correctly initialize with apiKey property
   return new GoogleGenAI({ apiKey });
 };
 
@@ -40,13 +41,15 @@ export const generateWeeklySummary = async (items: TimelineItem[]): Promise<Week
 
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
+      // Use recommended model for basic text tasks
+      model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
         responseMimeType: 'application/json'
       }
     });
 
+    // Directly access .text property from GenerateContentResponse
     const text = response.text;
     if (!text) throw new Error("No response");
 

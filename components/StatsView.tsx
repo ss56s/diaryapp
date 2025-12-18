@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { getAllTimelineItems, saveAIReport, getLatestReportForRange } from '../services/storageService';
 import { generateWeeklySummary } from '../services/geminiService';
@@ -347,7 +346,8 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                           </div>
                           <div>
                             <h3 className="font-bold text-lg text-indigo-50">AI 智能周报</h3>
-                            <p className="text-[10px] text-slate-400">Powered by Gemini 2.5</p>
+                            {/* Updated to reflect correct model series */}
+                            <p className="text-[10px] text-slate-400">Powered by Gemini 3</p>
                           </div>
                       </div>
                       {currentReport && !aiLoading && (

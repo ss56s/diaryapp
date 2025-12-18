@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import CalendarStrip from './CalendarStrip';
 import ConfirmModal from './ConfirmModal';
@@ -414,10 +413,11 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
               onClick={handleSend}
               disabled={isFuture || isProcessingFile || isSending || (!inputText.trim() && attachments.length === 0)}
               style={{ opacity: isProcessingFile ? 0.5 : 1 }}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all duration +300 shadow-md ${
+              // Fix: Added missing hyphens in utility classes duration-300, bg-slate-200, text-slate-400
+              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all duration-300 shadow-md ${
                 (!isFuture && !isProcessingFile && (inputText.trim() || attachments.length > 0))
                   ? `${activeCatConfig.color} text-white hover:shadow-lg hover:scale-105 active:scale-95` 
-                  : 'bg-slate 200 text-slate 400 cursor-not-allowed'
+                  : 'bg-slate-200 text-slate-400 cursor-not-allowed'
               }`}
             >
               {isSending ? (

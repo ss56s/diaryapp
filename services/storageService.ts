@@ -91,11 +91,31 @@ export const getItemsByDate = (date: string): TimelineItem[] => {
 
 export const uploadFileMock = async (file: File): Promise<Attachment> => {
   return new Promise((resolve, reject) => {
+    // Rule: If file is < 3MB, use original (support gif, png transparent).
+    // If file is > 3MB, compress to avoid crashing browser/network.
+    const USE_ORIGINAL_LIMIT = 3 * 1024 * 1024; // 3MB
+
+    if (file.size <= USE_ORIGINAL_LIMIT) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        if (!e.target?.result) return reject(new Error("File read error"));
+        resolve({
+          id: Math.random().toString(36).substring(7),
+          name: file.name,
+          type: file.type,
+          url: e.target.result as string
+        });
+      };
+      reader.onerror = () => reject(new Error("File read failed"));
+      reader.readAsDataURL(file);
+      return;
+    }
+
+    // Heavy file: Compress
     const reader = new FileReader();
     const img = new Image();
     const canvas = document.createElement('canvas');
     
-    // 1. Read file as Data URL
     reader.onload = (e) => {
       if (!e.target?.result) {
         reject(new Error("File read error"));
@@ -103,10 +123,9 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
       }
       img.src = e.target.result as string;
       
-      // 2. On image load, compress it via Canvas
       img.onload = () => {
-        const MAX_WIDTH = 1280; // Reasonable size for mobile view
-        const MAX_HEIGHT = 1280;
+        const MAX_WIDTH = 1920; // High Quality
+        const MAX_HEIGHT = 1920;
         let width = img.width;
         let height = img.height;
 
@@ -127,7 +146,6 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
         const ctx = canvas.getContext('2d');
         
         if (!ctx) {
-           // Fallback if canvas context is missing (rare)
            resolve({
              id: Math.random().toString(36).substring(7),
              name: file.name,
@@ -139,9 +157,8 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
 
         ctx.drawImage(img, 0, 0, width, height);
 
-        // 3. Export as JPEG with 0.7 quality
-        // This usually reduces a 5MB PNG to <300KB JPEG
-        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+        // Export as High Quality JPEG
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85);
 
         resolve({
           id: Math.random().toString(36).substring(7),

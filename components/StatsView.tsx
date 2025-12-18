@@ -317,8 +317,10 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                          href={att.url}
                                          target="_blank"
                                          rel="noopener noreferrer"
-                                         className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm"
+                                         download
+                                         className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm relative"
                                        >
+                                          <div className="absolute top-1 right-1 text-[8px] text-slate-300"><i className="fa-solid fa-download"></i></div>
                                           <i className={`fa-solid ${getFileIcon(att.type)} text-xs`}></i>
                                           <span className="text-[8px] text-textMuted font-bold uppercase">{att.name.split('.').pop()}</span>
                                        </a>

@@ -291,13 +291,14 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                   </div>
                                 );
                               } else {
-                                // Render Non-Image File (Click to Open)
+                                // Render Non-Image File (Click to Download)
                                 return (
                                   <a 
                                     key={att.id} 
                                     href={att.url} 
                                     target="_blank" 
                                     rel="noopener noreferrer"
+                                    download // Hint to browser to download
                                     className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer group"
                                   >
                                     <div className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
@@ -307,7 +308,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                       <p className="text-xs font-bold text-textMain truncate">{att.name}</p>
                                       <p className="text-[10px] text-textMuted uppercase">{att.name.split('.').pop() || 'FILE'}</p>
                                     </div>
-                                    <i className="fa-solid fa-arrow-up-right-from-square text-xs text-slate-300"></i>
+                                    <i className="fa-solid fa-download text-xs text-slate-300"></i>
                                   </a>
                                 );
                               }

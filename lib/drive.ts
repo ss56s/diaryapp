@@ -180,11 +180,19 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
           
           if(res.data.id) {
             // 4. Determine Link
-            // webViewLink: Google Drive Preview (best for docs, pdf, etc.)
-            // thumbnailLink: Best for images (can resize)
-            let finalUrl = res.data.webViewLink; 
+            // webContentLink: DIRECT DOWNLOAD LINK (force download)
+            // webViewLink: Preview Link (Google Docs Viewer)
+            // thumbnailLink: Image thumbnail
             
-            // Optimization for Images: Use high-res thumbnail if available
+            // Default to webContentLink for files to enable direct download
+            let finalUrl = res.data.webContentLink; 
+            
+            // Fallback if webContentLink is missing for some reason
+            if (!finalUrl) finalUrl = res.data.webViewLink;
+
+            // Optimization for Images: Use high-res thumbnail for display
+            // (Images are displayed inline, so we need the image data, not a download link usually,
+            // but the original 'url' field in Attachment is primarily for display/access)
             if (mimeType.startsWith('image/') && res.data.thumbnailLink) {
                 finalUrl = res.data.thumbnailLink.replace(/=s\d+.*$/, '=s3000');
             }

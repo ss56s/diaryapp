@@ -11,6 +11,16 @@ interface HistoryViewProps {
   onImageClick: (url: string) => void;
 }
 
+const getFileIcon = (mimeType: string) => {
+  if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
+  if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
+  if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
+  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('tar') || mimeType.includes('rar')) return 'fa-file-zipper text-amber-500';
+  if (mimeType.includes('text') || mimeType.includes('txt')) return 'fa-file-lines text-slate-500';
+  return 'fa-file text-slate-400';
+};
+
 const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
   const [items, setItems] = useState<TimelineItem[]>([]);
   const [viewDate, setViewDate] = useState(new Date());
@@ -75,7 +85,6 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
       await deleteTimelineItem(itemToDelete);
       
       // 2. Optimistic remote delete
-      // We rely on the date of the item for the folder structure in Drive
       const item = items.find(i => i.id === itemToDelete);
       const deleteDate = item ? item.date : selectedDate;
 
@@ -295,14 +304,32 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                     
                     {item.attachments.length > 0 && (
                        <div className="flex gap-2 overflow-x-auto pb-2 mt-2">
-                         {item.attachments.map(att => (
-                           <img 
-                              key={att.id} 
-                              src={att.url} 
-                              className="w-16 h-16 rounded-xl object-cover shadow-sm border border-slate-50 cursor-zoom-in active:scale-95 transition-transform" 
-                              onClick={() => onImageClick(att.url)}
-                           />
-                         ))}
+                         {item.attachments.map(att => {
+                           const isImg = att.type.startsWith('image/');
+                           if (isImg) {
+                             return (
+                               <img 
+                                  key={att.id} 
+                                  src={att.url} 
+                                  className="w-16 h-16 rounded-xl object-cover shadow-sm border border-slate-50 cursor-zoom-in active:scale-95 transition-transform" 
+                                  onClick={() => onImageClick(att.url)}
+                               />
+                             );
+                           } else {
+                             return (
+                               <a 
+                                 key={att.id} 
+                                 href={att.url} 
+                                 target="_blank" 
+                                 rel="noopener noreferrer"
+                                 className="w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm hover:bg-slate-100 transition-colors"
+                               >
+                                  <i className={`fa-solid ${getFileIcon(att.type)} text-xl`}></i>
+                                  <span className="text-[9px] text-textMuted font-bold uppercase truncate w-full text-center px-1">{att.name.split('.').pop()}</span>
+                               </a>
+                             );
+                           }
+                         })}
                        </div>
                     )}
                   </div>

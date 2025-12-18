@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { getAllTimelineItems, saveAIReport, getLatestReportForRange } from '../services/storageService';
 import { generateWeeklySummary } from '../services/geminiService';
@@ -12,6 +13,14 @@ declare global {
 interface StatsViewProps {
   onImageClick: (url: string) => void;
 }
+
+const getFileIcon = (mimeType: string) => {
+  if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
+  if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
+  if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'fa-file-zipper text-amber-500';
+  return 'fa-file text-slate-400';
+};
 
 const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
   const [items, setItems] = useState<TimelineItem[]>([]);
@@ -227,7 +236,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
            )}
         </div>
 
-        {/* Date Controls (Hidden if searching, or keep visible to show context? Keeping visible for context) */}
+        {/* Date Controls */}
         <div className="flex flex-col gap-4">
            <div className="bg-slate-100 p-1 rounded-xl flex self-center">
               <button onClick={() => setViewMode('week')} className={`px-6 py-1.5 rounded-lg text-xs font-bold transition-all ${viewMode === 'week' ? 'bg-white shadow-sm text-primary' : 'text-textMuted'}`}>周视图</button>
@@ -290,14 +299,32 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
 
                             {item.attachments.length > 0 && (
                                <div className="flex gap-2 overflow-x-auto pb-1 mt-1">
-                                 {item.attachments.map(att => (
-                                   <img 
-                                      key={att.id} 
-                                      src={att.url} 
-                                      className="w-12 h-12 rounded-lg object-cover shadow-sm border border-slate-50 cursor-zoom-in active:scale-95 transition-transform" 
-                                      onClick={() => onImageClick(att.url)}
-                                   />
-                                 ))}
+                                 {item.attachments.map(att => {
+                                   const isImg = att.type.startsWith('image/');
+                                   if (isImg) {
+                                     return (
+                                       <img 
+                                          key={att.id} 
+                                          src={att.url} 
+                                          className="w-12 h-12 rounded-lg object-cover shadow-sm border border-slate-50 cursor-zoom-in active:scale-95 transition-transform" 
+                                          onClick={() => onImageClick(att.url)}
+                                       />
+                                     );
+                                   } else {
+                                     return (
+                                       <a 
+                                         key={att.id}
+                                         href={att.url}
+                                         target="_blank"
+                                         rel="noopener noreferrer"
+                                         className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm"
+                                       >
+                                          <i className={`fa-solid ${getFileIcon(att.type)} text-xs`}></i>
+                                          <span className="text-[8px] text-textMuted font-bold uppercase">{att.name.split('.').pop()}</span>
+                                       </a>
+                                     );
+                                   }
+                                 })}
                                </div>
                             )}
                           </div>
@@ -346,7 +373,6 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                           </div>
                           <div>
                             <h3 className="font-bold text-lg text-indigo-50">AI 智能周报</h3>
-                            {/* Updated to reflect correct model series */}
                             <p className="text-[10px] text-slate-400">Powered by Gemini 3</p>
                           </div>
                       </div>

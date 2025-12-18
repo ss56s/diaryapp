@@ -57,29 +57,42 @@ const findLogFileId = async (drive: any, username: string, date: string, logId: 
 
 // Helper: Map MIME types to extensions
 const getExtensionFromMime = (mime: string, originalName?: string): string => {
+  // 1. Try to get extension from original filename first (most reliable for complex types)
   if (originalName && originalName.includes('.')) {
     return originalName.split('.').pop() || 'bin';
   }
   
+  // 2. Fallback to MIME mapping
   const map: Record<string, string> = {
     'image/jpeg': 'jpg',
     'image/jpg': 'jpg',
     'image/png': 'png',
     'image/gif': 'gif',
     'image/webp': 'webp',
-    'image/heic': 'heic',
     'application/pdf': 'pdf',
+    // Word
     'application/msword': 'doc',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    // Excel
     'application/vnd.ms-excel': 'xls',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-    'text/plain': 'txt',
-    'text/csv': 'csv',
+    // PPT
+    'application/vnd.ms-powerpoint': 'ppt',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx',
+    // Archives
     'application/zip': 'zip',
     'application/x-zip-compressed': 'zip',
     'application/x-7z-compressed': '7z',
-    'application/x-rar-compressed': 'rar'
+    'application/x-rar-compressed': 'rar',
+    // Text
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'text/markdown': 'md',
+    'application/json': 'json'
   };
+
+  // Exact match
+  if (map[mime]) return map[mime];
 
   // Fuzzy match
   for (const key in map) {
@@ -141,8 +154,10 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
           const mimeType = matches[1];
           const base64Data = matches[2];
           const buffer = Buffer.from(base64Data, 'base64');
+          
+          // Use original name extension if available, otherwise guess from mime
           const ext = getExtensionFromMime(mimeType, att.name);
-          const fileName = `${log.timestamp}_${att.id}.${ext}`; // Clean filename
+          const fileName = `${log.timestamp}_${att.id}.${ext}`; 
 
           // 2. Create Readable Stream from Buffer
           const stream = new Readable();
@@ -150,7 +165,6 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
           stream.push(null); // Signal end of stream
 
           // 3. Upload File to Drive
-          // IMPORTANT: media.body must be the stream
           const res = await drive.files.create({
             requestBody: { 
               name: fileName, 
@@ -166,12 +180,11 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
           
           if(res.data.id) {
             // 4. Determine Link
-            // webViewLink is the preview link (good for PDF/Docs).
-            // thumbnailLink is good for images.
-            // webContentLink is for direct download.
-            let finalUrl = res.data.webViewLink; // Default to preview
+            // webViewLink: Google Drive Preview (best for docs, pdf, etc.)
+            // thumbnailLink: Best for images (can resize)
+            let finalUrl = res.data.webViewLink; 
             
-            // Optimization for Images: Use high-res thumbnail
+            // Optimization for Images: Use high-res thumbnail if available
             if (mimeType.startsWith('image/') && res.data.thumbnailLink) {
                 finalUrl = res.data.thumbnailLink.replace(/=s\d+.*$/, '=s3000');
             }
@@ -181,7 +194,7 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
             cleanAttachments.push({ 
               ...att, 
               driveId: res.data.id, 
-              url: finalUrl || att.url // Prefer Drive Link
+              url: finalUrl || att.url 
             });
           } else {
             console.error("Upload returned no ID, falling back to base64");
@@ -199,8 +212,6 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
   }
 
   // Create the object to save to JSON file. 
-  // CRITICAL: This object uses 'cleanAttachments', so the JSON file on Drive will NOT contain Base64 
-  // if the upload was successful.
   const logToSave = { 
     ...log, 
     attachments: cleanAttachments, 

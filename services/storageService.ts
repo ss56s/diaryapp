@@ -93,21 +93,21 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
   return new Promise((resolve, reject) => {
     const isImage = file.type.startsWith('image/');
     
-    // Rule: We want "Original Format" as much as possible.
-    // 1. If NOT image, always keep original.
+    // Rule: "Original Format" is priority.
+    // 1. If NOT image (PDF, Doc, Zip...), ALWAYS keep original.
     // 2. If Image < 10MB, keep original.
     // 3. Only compress if Image > 10MB (to prevent crashing browsers/server limits).
     const USE_ORIGINAL_LIMIT = 10 * 1024 * 1024; // 10MB
 
     if (!isImage || file.size <= USE_ORIGINAL_LIMIT) {
-      console.log(`[Storage] Using original file: ${file.name} (${(file.size/1024/1024).toFixed(2)}MB)`);
+      console.log(`[Storage] Processing file: ${file.name} (${(file.size/1024/1024).toFixed(2)}MB) - Type: ${file.type || 'Unknown'}`);
       const reader = new FileReader();
       reader.onload = (e) => {
         if (!e.target?.result) return reject(new Error("File read error"));
         resolve({
           id: Math.random().toString(36).substring(7),
           name: file.name,
-          type: file.type || 'application/octet-stream',
+          type: file.type || 'application/octet-stream', // Fallback for unknown types
           url: e.target.result as string
         });
       };
@@ -130,7 +130,7 @@ export const uploadFileMock = async (file: File): Promise<Attachment> => {
       img.src = e.target.result as string;
       
       img.onload = () => {
-        const MAX_WIDTH = 2560; // Increased Quality
+        const MAX_WIDTH = 2560; 
         const MAX_HEIGHT = 2560;
         let width = img.width;
         let height = img.height;

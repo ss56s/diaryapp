@@ -12,6 +12,17 @@ interface LogViewProps {
   onImageClick: (url: string) => void;
 }
 
+// Helper for File Icons
+const getFileIcon = (mimeType: string) => {
+  if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
+  if (mimeType.includes('word') || mimeType.includes('document')) return 'fa-file-word text-blue-500';
+  if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
+  if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
+  if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('tar') || mimeType.includes('rar')) return 'fa-file-zipper text-amber-500';
+  if (mimeType.includes('text') || mimeType.includes('txt')) return 'fa-file-lines text-slate-500';
+  return 'fa-file text-slate-400';
+};
+
 const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, onImageClick }) => {
   const [selectedDate, setSelectedDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [items, setItems] = useState<TimelineItem[]>([]);
@@ -58,27 +69,17 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     setIsSyncing(true);
 
     try {
-      // 1. Process Pending Deletes First (Clean up Drive)
-      // This prevents "pull" from bringing back things we just deleted if we are online
       const pendingDeletes = getPendingDeletes();
       if (pendingDeletes.length > 0) {
         console.log(`[Sync] Processing ${pendingDeletes.length} deletions...`);
         for (const deleteId of pendingDeletes) {
-           // We pass selectedDate for optimization, though deleting usually requires finding the file.
-           // Since we don't store the date of deleted items in the simple array, we try current date 
-           // or we rely on the server implementation finding it.
-           // NOTE: Ideally 'pendingDeletes' should be objects {id, date}. 
-           // For now, we attempt to delete. If it's in a different date folder, this simple sync might fail to find it
-           // unless we upgrade storageService. But let's try.
            const res = await deleteLogAction(selectedDate, deleteId);
-           // If successful or not found, we clear it from pending
            if (res.success || res.message === '删除失败') { 
              removePendingDelete(deleteId);
            }
         }
       }
 
-      // 2. Pull from Drive
       const pullRes = await pullLogsFromDriveAction(selectedDate);
       if (pullRes.success && pullRes.items) {
         upsertTimelineItems(pullRes.items);
@@ -86,7 +87,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
          console.warn("Pull failed:", pullRes.message);
       }
 
-      // 3. Push pending logs (Updates/Creates)
       const currentItems = getItemsByDate(selectedDate);
       const pendingItems = currentItems.filter(i => i.syncStatus !== 'synced');
       
@@ -182,15 +182,10 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
   const confirmDelete = async () => {
     if (itemToDelete) {
-      // 1. Delete locally (mark as pending delete)
       await deleteTimelineItem(itemToDelete);
-      
-      // 2. Try to delete remotely immediately if possible
-      // (This is best effort. If it fails, the sync logic will catch it later via getPendingDeletes)
       deleteLogAction(selectedDate, itemToDelete).then(res => {
          if (res.success) removePendingDelete(itemToDelete);
       });
-      
       refreshItems();
       setItemToDelete(null);
     }
@@ -205,7 +200,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
         const att = await uploadFileMock(file);
         setAttachments(prev => [...prev, att]);
       } catch (err) {
-        alert("图片读取失败");
+        alert("文件读取失败");
       } finally {
         setIsProcessingFile(false);
         if (e.target) e.target.value = '';
@@ -278,20 +273,45 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                         <p className="text-textMain text-[15px] leading-relaxed whitespace-pre-wrap break-words">{item.content}</p>
                         {item.attachments.length > 0 && (
                           <div className="mt-3 grid grid-cols-2 gap-2">
-                            {item.attachments.map(att => (
-                              <div key={att.id} className="relative aspect-video rounded-xl overflow-hidden shadow-sm cursor-zoom-in active:scale-95 transition-transform" onClick={() => onImageClick(att.url)}>
-                                 <img 
-                                   src={att.url} 
-                                   className="w-full h-full object-cover" 
-                                   alt="attachment" 
-                                   onError={(e) => {
-                                      const t = e.target as HTMLImageElement;
-                                      t.style.display='none';
-                                      t.parentElement!.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-slate-50 text-xs text-slate-400 p-2 text-center"><i class="fa-solid fa-image mr-1"></i>图片已同步</div>`;
-                                   }}
-                                 />
-                              </div>
-                            ))}
+                            {item.attachments.map(att => {
+                              const isImg = att.type.startsWith('image/');
+                              if (isImg) {
+                                return (
+                                  <div key={att.id} className="relative aspect-video rounded-xl overflow-hidden shadow-sm cursor-zoom-in active:scale-95 transition-transform" onClick={() => onImageClick(att.url)}>
+                                    <img 
+                                      src={att.url} 
+                                      className="w-full h-full object-cover" 
+                                      alt="attachment" 
+                                      onError={(e) => {
+                                          const t = e.target as HTMLImageElement;
+                                          t.style.display='none';
+                                          t.parentElement!.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-slate-50 text-xs text-slate-400 p-2 text-center"><i class="fa-solid fa-image mr-1"></i>图片已同步</div>`;
+                                      }}
+                                    />
+                                  </div>
+                                );
+                              } else {
+                                // Render Non-Image File (Click to Open)
+                                return (
+                                  <a 
+                                    key={att.id} 
+                                    href={att.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer group"
+                                  >
+                                    <div className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
+                                       <i className={`fa-solid ${getFileIcon(att.type)} text-xl`}></i>
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-bold text-textMain truncate">{att.name}</p>
+                                      <p className="text-[10px] text-textMuted uppercase">{att.name.split('.').pop() || 'FILE'}</p>
+                                    </div>
+                                    <i className="fa-solid fa-arrow-up-right-from-square text-xs text-slate-300"></i>
+                                  </a>
+                                );
+                              }
+                            })}
                           </div>
                         )}
                       </div>
@@ -307,7 +327,9 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
       </div>
 
       <div id="sticky-input-bar" className={`fixed left-4 right-4 z-40 max-w-lg mx-auto transition-all duration-100 ease-out ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} ${showKeyboardLayout ? 'bottom-[150px] pb-2' : 'bottom-[100px]'}`}>
-        <div id="loading-badge" className={`absolute -top-8 left-4 bg-black text-white text-xs py-1 px-3 rounded-full shadow-md z-50 ${isProcessingFile ? 'block' : 'hidden'}`}>📸 图片处理中...</div>
+        <div id="loading-badge" className={`absolute -top-8 left-4 bg-black text-white text-xs py-1 px-3 rounded-full shadow-md z-50 ${isProcessingFile ? 'block' : 'hidden'}`}>
+           <i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i> 文件处理中...
+        </div>
         <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileUpload} />
         <input type="file" ref={fileInputRef} className="hidden" accept="*/*" onChange={handleFileUpload} />
 
@@ -323,12 +345,19 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
           <div className="flex-grow flex flex-col justify-center min-h-[44px]">
              {attachments.length > 0 && (
                 <div className="flex gap-2 mb-1 overflow-x-auto pb-1 pl-1">
-                   {attachments.map(att => (
-                      <div key={att.id} className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-slate-200">
-                        <img src={att.url} className="w-full h-full object-cover" />
-                        <button onClick={() => setAttachments(prev => prev.filter(p => p.id !== att.id))} className="absolute inset-0 bg-black/40 text-white text-[10px] flex items-center justify-center"><i className="fa-solid fa-xmark"></i></button>
-                      </div>
-                   ))}
+                   {attachments.map(att => {
+                      const isImg = att.type.startsWith('image/');
+                      return (
+                        <div key={att.id} className={`relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 border border-slate-200 ${!isImg ? 'bg-slate-50 flex items-center justify-center' : ''}`}>
+                          {isImg ? (
+                            <img src={att.url} className="w-full h-full object-cover" />
+                          ) : (
+                            <i className={`fa-solid ${getFileIcon(att.type)} text-xs`}></i>
+                          )}
+                          <button onClick={() => setAttachments(prev => prev.filter(p => p.id !== att.id))} className="absolute inset-0 bg-black/40 text-white text-[10px] flex items-center justify-center hover:bg-black/60 transition-colors"><i className="fa-solid fa-xmark"></i></button>
+                        </div>
+                      );
+                   })}
                 </div>
              )}
              <textarea value={inputText} onChange={(e) => setInputText(e.target.value)} placeholder={isFuture ? "无法在未来添加日志" : `记录${activeCatConfig.label}点滴...`} className="w-full bg-transparent border-none outline-none text-[15px] text-textMain placeholder-slate-400 resize-none py-2.5 max-h-32" rows={1} onFocus={() => setIsInputFocused(true)} onBlur={() => setIsInputFocused(false)} onInput={(e) => { const t = e.target as HTMLTextAreaElement; t.style.height='auto'; t.style.height=t.scrollHeight+'px'; }} />

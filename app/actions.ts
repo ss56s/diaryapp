@@ -39,8 +39,9 @@ export async function syncLogAction(logItem: TimelineItem) {
   try {
     await uploadLogToDrive(session.username, logItem);
     return { success: true };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Google Drive Sync Error:', error);
-    return { success: false, message: error.message || '上传失败' };
+    // Fixed: Cast error to 'any' to access message property safely in TypeScript
+    return { success: false, message: error?.message || '上传失败' };
   }
 }

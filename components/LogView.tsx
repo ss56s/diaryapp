@@ -26,13 +26,25 @@ const getFileIcon = (mimeType: string) => {
 // Helper to force Google Drive download link
 const getDownloadUrl = (url: string) => {
   if (!url) return '';
-  // Check if it is a Google Drive View Link
-  if (url.includes('drive.google.com') && url.includes('/view')) {
-    const match = url.match(/\/d\/([^/]+)/);
-    if (match && match[1]) {
-      // Convert to export=download format
-      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+  try {
+    // Check if it looks like a Google Drive URL
+    if (url.includes('drive.google.com')) {
+      // Case 1: /file/d/ID/view or /file/d/ID/preview
+      const pathMatch = url.match(/\/d\/([^/]+)/);
+      if (pathMatch && pathMatch[1]) {
+        return `https://drive.google.com/uc?export=download&id=${pathMatch[1]}`;
+      }
+      // Case 2: id=ID query param
+      if (url.includes('id=')) {
+        const urlObj = new URL(url);
+        const id = urlObj.searchParams.get('id');
+        if (id) {
+          return `https://drive.google.com/uc?export=download&id=${id}`;
+        }
+      }
     }
+  } catch (e) {
+    console.error("URL parse error", e);
   }
   return url;
 };
@@ -311,8 +323,9 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                   <a 
                                     key={att.id} 
                                     href={getDownloadUrl(att.url)} 
-                                    // Removed target="_blank" to prevent opening new tab
-                                    download // Hint to browser to download
+                                    target="_blank" // Prevent app from navigating away
+                                    rel="noopener noreferrer" 
+                                    download 
                                     className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer group"
                                   >
                                     <div className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">

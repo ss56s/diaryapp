@@ -25,11 +25,22 @@ const getFileIcon = (mimeType: string) => {
 // Helper to force Google Drive download link
 const getDownloadUrl = (url: string) => {
   if (!url) return '';
-  if (url.includes('drive.google.com') && url.includes('/view')) {
-    const match = url.match(/\/d\/([^/]+)/);
-    if (match && match[1]) {
-      return `https://drive.google.com/uc?export=download&id=${match[1]}`;
+  try {
+    if (url.includes('drive.google.com')) {
+      const pathMatch = url.match(/\/d\/([^/]+)/);
+      if (pathMatch && pathMatch[1]) {
+        return `https://drive.google.com/uc?export=download&id=${pathMatch[1]}`;
+      }
+      if (url.includes('id=')) {
+        const urlObj = new URL(url);
+        const id = urlObj.searchParams.get('id');
+        if (id) {
+          return `https://drive.google.com/uc?export=download&id=${id}`;
+        }
+      }
     }
+  } catch (e) {
+    console.error("URL parse error", e);
   }
   return url;
 };
@@ -327,7 +338,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                        <a 
                                          key={att.id}
                                          href={getDownloadUrl(att.url)}
-                                         // Removed target="_blank"
+                                         target="_blank" // Restore target="_blank"
                                          download
                                          className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm relative"
                                        >

@@ -124,32 +124,18 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
     }
 
     setDownloadingId(att.id);
-    try {
-      const apiUrl = `/api/proxy-download?fileId=${fileId}&filename=${encodeURIComponent(att.name)}&contentType=${encodeURIComponent(att.type)}`;
-      
-      const response = await fetch(apiUrl);
-      if (!response.ok) throw new Error("下载请求失败");
-
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = att.name;
-      document.body.appendChild(a);
-      a.click();
-      
-      setTimeout(() => {
-        window.URL.revokeObjectURL(blobUrl);
-        document.body.removeChild(a);
-      }, 100);
-
-    } catch (error) {
-      console.error("Download failed:", error);
-      alert("下载失败，请重试");
-    } finally {
-      setDownloadingId(null);
-    }
+    const apiUrl = `/api/proxy-download?fileId=${fileId}&filename=${encodeURIComponent(att.name)}&contentType=${encodeURIComponent(att.type)}`;
+    
+    const link = document.createElement('a');
+    link.href = apiUrl;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    
+    setTimeout(() => {
+        document.body.removeChild(link);
+        setDownloadingId(null);
+    }, 1500);
   };
 
   const handleTouchStart = (e: React.TouchEvent) => {

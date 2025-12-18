@@ -78,46 +78,37 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     }
   }, [items, selectedDate]);
 
-  // Handle Download Logic
+  // Handle Download Logic (Direct Link)
   const handleDownload = async (att: Attachment) => {
-    if (downloadingId) return; // Prevent multiple downloads
+    if (downloadingId) return; // Prevent multiple clicks
 
     const fileId = getDriveFileId(att.url);
     if (!fileId) {
-       // Not a Drive URL, just open it
        window.open(att.url, '_blank');
        return;
     }
 
+    // 1. Show Spinner immediately
     setDownloadingId(att.id);
-    try {
-      // Pass filename and mimeType to skip backend metadata fetch (Speed Optimization)
-      const apiUrl = `/api/proxy-download?fileId=${fileId}&filename=${encodeURIComponent(att.name)}&contentType=${encodeURIComponent(att.type)}`;
-      
-      const response = await fetch(apiUrl);
-      if (!response.ok) throw new Error("下载请求失败");
 
-      const blob = await response.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
-      
-      const a = document.createElement('a');
-      a.href = blobUrl;
-      a.download = att.name;
-      document.body.appendChild(a);
-      a.click();
-      
-      // Cleanup
-      setTimeout(() => {
-        window.URL.revokeObjectURL(blobUrl);
-        document.body.removeChild(a);
-      }, 100);
-
-    } catch (error) {
-      console.error("Download failed:", error);
-      alert("下载失败，请重试");
-    } finally {
-      setDownloadingId(null);
-    }
+    // 2. Construct Proxy URL
+    const apiUrl = `/api/proxy-download?fileId=${fileId}&filename=${encodeURIComponent(att.name)}&contentType=${encodeURIComponent(att.type)}`;
+    
+    // 3. Trigger download via hidden link (Lets browser handle the stream)
+    // This allows the browser to show its native download manager immediately
+    // without waiting for the file to be fully buffered in JS.
+    const link = document.createElement('a');
+    link.href = apiUrl;
+    link.style.display = 'none';
+    document.body.appendChild(link);
+    link.click();
+    
+    // Cleanup
+    setTimeout(() => {
+        document.body.removeChild(link);
+        // Clear spinner after a short delay to give visual feedback that request was sent
+        setDownloadingId(null);
+    }, 1500);
   };
 
   const handleFullSync = async () => {
@@ -357,7 +348,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-bold text-textMain truncate">{att.name}</p>
                                       <p className="text-[10px] text-textMuted uppercase">
-                                        {isDownloading ? '下载中...' : (att.name.split('.').pop() || 'FILE')}
+                                        {isDownloading ? '请求中...' : (att.name.split('.').pop() || 'FILE')}
                                       </p>
                                     </div>
                                     {!isDownloading && <i className="fa-solid fa-download text-xs text-slate-300"></i>}

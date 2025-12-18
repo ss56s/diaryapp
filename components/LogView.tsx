@@ -92,7 +92,8 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
       const pullRes = await pullLogsFromDriveAction(selectedDate);
       if (pullRes.success && pullRes.items) {
-        upsertTimelineItems(pullRes.items);
+        // Pass selectedDate to enable pruning of locally deleted files
+        upsertTimelineItems(pullRes.items, selectedDate);
       } else if (!pullRes.success && pullRes.message) {
          console.warn("Pull failed:", pullRes.message);
       }

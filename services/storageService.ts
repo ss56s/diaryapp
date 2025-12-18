@@ -42,21 +42,47 @@ export const saveTimelineItem = async (item: TimelineItem): Promise<void> => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(newItems));
 };
 
-export const upsertTimelineItems = (remoteItems: TimelineItem[]) => {
-  const allItems = getAllTimelineItems();
-  const itemMap = new Map(allItems.map(i => [i.id, i]));
+export const upsertTimelineItems = (remoteItems: TimelineItem[], targetDate?: string) => {
+  let allItems = getAllTimelineItems();
   const deletedIds = getPendingDeletes(); // Get list of items user deleted locally
+  
+  // Create a Set of Remote IDs for O(1) lookup
+  const remoteIdSet = new Set(remoteItems.map(i => i.id));
+
+  // 1. Pruning Phase: Handle Remote Deletions
+  // If we are syncing a specific date (targetDate), check for items that exist locally as 'synced'
+  // but are missing from the remote list. This implies they were deleted on another device.
+  if (targetDate) {
+    allItems = allItems.filter(item => {
+      // Only check items belonging to the date we are currently syncing
+      if (item.date === targetDate) {
+        // Condition: Item was previously synced, but is NOT in the fresh remote list
+        if (item.syncStatus === 'synced' && !remoteIdSet.has(item.id)) {
+          console.log(`[Storage] Pruning item ${item.id} because it is missing from remote (Remote Deletion)`);
+          return false; // Remove from local storage
+        }
+      }
+      return true; // Keep
+    });
+  }
+
+  // 2. Merging Phase: Update or Insert Remote Items
+  const itemMap = new Map(allItems.map(i => [i.id, i]));
 
   remoteItems.forEach(remoteItem => {
-    // CRITICAL: If this item is marked as deleted locally, DO NOT restore it.
+    // CRITICAL: If this item is marked as deleted locally (pending delete), DO NOT restore it from server.
     if (deletedIds.includes(remoteItem.id)) {
-      console.log(`[Storage] Ignoring remote item ${remoteItem.id} because it is pending deletion.`);
+      console.log(`[Storage] Ignoring remote item ${remoteItem.id} because it is pending local deletion.`);
       return; 
     }
 
     const localItem = itemMap.get(remoteItem.id);
     
-    // Smart Merge: Only overwrite if local is clean or new
+    // Smart Merge: 
+    // - If it doesn't exist locally, add it.
+    // - If it exists locally and is 'synced' (clean), overwrite it with server version (server is truth).
+    // - If it exists locally but is 'pending' or 'error' (dirty), KEEP local version (avoid overwriting unsaved edits),
+    //   unless timestamps suggest otherwise (simplified here to prefer local edits).
     if (!localItem || localItem.syncStatus === 'synced') {
       itemMap.set(remoteItem.id, { ...remoteItem, syncStatus: 'synced' });
     }

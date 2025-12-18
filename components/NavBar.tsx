@@ -11,6 +11,7 @@ const NavBar: React.FC<NavBarProps> = ({ currentTab, onTabChange }) => {
     { id: AppTab.LOG, icon: 'fa-pen-to-square', label: '记录' },
     { id: AppTab.CALENDAR, icon: 'fa-calendar-days', label: '日历' },
     { id: AppTab.STATS, icon: 'fa-chart-simple', label: '分析' },
+    { id: AppTab.SETTINGS, icon: 'fa-gear', label: '设置' },
   ];
 
   return (

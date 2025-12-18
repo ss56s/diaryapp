@@ -6,6 +6,7 @@ export interface TimelineItem {
   content: string;
   category?: CategoryType;
   attachments: Attachment[];
+  syncStatus?: 'synced' | 'pending' | 'error';
 }
 
 export interface Attachment {
@@ -18,7 +19,8 @@ export interface Attachment {
 export enum AppTab {
   LOG = 'LOG',
   CALENDAR = 'CALENDAR',
-  STATS = 'STATS'
+  STATS = 'STATS',
+  SETTINGS = 'SETTINGS'
 }
 
 export interface WeeklySummary {

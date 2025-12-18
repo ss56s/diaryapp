@@ -332,8 +332,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                                <a 
                                  key={att.id} 
                                  href={getDownloadUrl(att.url)} 
-                                 target="_blank" 
-                                 rel="noopener noreferrer"
+                                 // Removed target="_blank"
                                  download // Hint browser to download
                                  className="w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm hover:bg-slate-100 transition-colors relative"
                                >

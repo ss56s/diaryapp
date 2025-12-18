@@ -310,8 +310,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                   <a 
                                     key={att.id} 
                                     href={getDownloadUrl(att.url)} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer"
+                                    // Removed target="_blank" to prevent opening new tab
                                     download // Hint to browser to download
                                     className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer group"
                                   >

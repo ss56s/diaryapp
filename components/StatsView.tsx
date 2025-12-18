@@ -327,8 +327,7 @@ const StatsView: React.FC<StatsViewProps> = ({ onImageClick }) => {
                                        <a 
                                          key={att.id}
                                          href={getDownloadUrl(att.url)}
-                                         target="_blank"
-                                         rel="noopener noreferrer"
+                                         // Removed target="_blank"
                                          download
                                          className="w-12 h-12 rounded-lg bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm relative"
                                        >

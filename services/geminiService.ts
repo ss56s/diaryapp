@@ -1,4 +1,5 @@
-import { GoogleGenAI } from "@google/genai";
+
+import { GoogleGenAI, Type } from "@google/genai";
 import { TimelineItem, WeeklySummary } from '../types';
 
 const getAiClient = () => {
@@ -45,7 +46,30 @@ export const generateWeeklySummary = async (items: TimelineItem[]): Promise<Week
       model: 'gemini-3-flash-preview',
       contents: prompt,
       config: {
-        responseMimeType: 'application/json'
+        responseMimeType: 'application/json',
+        // Fix: Use responseSchema for guaranteed structured JSON output as per SDK guidelines
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: {
+              type: Type.STRING,
+              description: 'A brief narrative summary of the week.',
+            },
+            keyAchievements: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.STRING,
+              },
+              description: 'List of main accomplishments found in the logs.',
+            },
+            suggestions: {
+              type: Type.STRING,
+              description: 'A short suggestion based on work patterns.',
+            },
+          },
+          required: ["summary", "keyAchievements", "suggestions"],
+          propertyOrdering: ["summary", "keyAchievements", "suggestions"],
+        }
       }
     });
 

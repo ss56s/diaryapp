@@ -2,6 +2,7 @@
 import { google } from 'googleapis';
 import { TimelineItem } from '../types';
 import { Readable } from 'stream';
+// Fix: Import Buffer explicitly for Node.js environment consistency in server actions
 import { Buffer } from 'buffer';
 
 const getOAuth2Client = () => {
@@ -22,14 +23,14 @@ const findOrCreateFolder = async (drive: any, parentId: string, folderName: stri
   const res = await drive.files.list({ q, fields: 'files(id, name)' });
 
   if (res.data.files && res.data.files.length > 0) {
-    return res.data.files[0].id;
+    return res.data.files[0].id!;
   }
 
   const file = await drive.files.create({
     requestBody: { name: folderName, mimeType: 'application/vnd.google-apps.folder', parents: [parentId] },
     fields: 'id',
   });
-  return file.data.id;
+  return file.data.id!;
 };
 
 export const uploadLogToDrive = async (username: string, log: TimelineItem) => {
@@ -52,6 +53,8 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem) => {
       if (att.url.startsWith('data:')) {
         const base64Data = att.url.split(',')[1];
         const buffer = Buffer.from(base64Data, 'base64');
+        
+        // Convert Buffer to Readable Stream for googleapis
         const stream = new Readable();
         stream.push(buffer);
         stream.push(null);
@@ -69,17 +72,20 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem) => {
   }
 
   const logToSave = { ...log, attachments: attachmentLinks, syncStatus: 'synced' };
+  const logContent = JSON.stringify(logToSave, null, 2);
+  
+  // Create stream from string
   const logStream = new Readable();
-  logStream.push(JSON.stringify(logToSave, null, 2));
+  logStream.push(logContent);
   logStream.push(null);
 
   // Check if file already exists (upsert)
   const existingFileQ = `'${dayId}' in parents and name = 'log_${log.id}.json' and trashed = false`;
   const existing = await drive.files.list({ q: existingFileQ, fields: 'files(id)' });
 
-  if (existing.data.files && existing.data.files.length > 0) {
+  if (existing.data.files && existing.data.files.length > 0 && existing.data.files[0].id) {
     await drive.files.update({
-      fileId: existing.data.files[0].id,
+      fileId: existing.data.files[0].id as string, // Fix: Explicit cast to string
       media: { mimeType: 'application/json', body: logStream },
     });
   } else {
@@ -102,7 +108,6 @@ export const fetchLogsByDate = async (username: string, date: string): Promise<T
     const userId = await findOrCreateFolder(drive, diaryId, username);
     const [year, month, day] = date.split('-');
     
-    // Find nested folders manually to avoid creating them if we're just pulling
     const findFolderId = async (pId: string, name: string) => {
       const q = `'${pId}' in parents and name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
       const res = await drive.files.list({ q, fields: 'files(id)' });
@@ -121,6 +126,7 @@ export const fetchLogsByDate = async (username: string, date: string): Promise<T
 
     const items: TimelineItem[] = [];
     for (const file of res.data.files || []) {
+      if (!file.id) continue;
       const content = await drive.files.get({ fileId: file.id, alt: 'media' });
       items.push(content.data as TimelineItem);
     }

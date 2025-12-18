@@ -1,0 +1,8 @@
+{
+  "name": "日记",
+  "description": "A mobile-first personal work logger with Gemini AI insights, featuring a glassmorphic design.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

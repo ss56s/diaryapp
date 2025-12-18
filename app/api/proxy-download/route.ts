@@ -24,9 +24,9 @@ export async function GET(req: NextRequest) {
   try {
     const drive = getOAuth2Client();
 
-    let filename = clientFilename;
-    let mimeType = clientMimeType;
-    let size = undefined;
+    let filename: string | null | undefined = clientFilename;
+    let mimeType: string | null | undefined = clientMimeType;
+    let size: string | null | undefined = undefined;
 
     // Only fetch metadata if client didn't provide it (Backward compatibility or direct link usage)
     if (!filename) {
@@ -34,9 +34,9 @@ export async function GET(req: NextRequest) {
             fileId: fileId,
             fields: 'name, mimeType, size'
         });
-        filename = meta.data.name;
-        mimeType = meta.data.mimeType;
-        size = meta.data.size;
+        filename = meta.data.name || null;
+        mimeType = meta.data.mimeType || null;
+        size = meta.data.size || undefined;
     }
 
     // 3. Get File Stream

@@ -13,6 +13,9 @@ export async function GET(req: NextRequest) {
   // 2. Parse Query
   const { searchParams } = new URL(req.url);
   const fileId = searchParams.get('fileId');
+  // Optimization: Accept metadata from client to skip an API round-trip
+  const clientFilename = searchParams.get('filename');
+  const clientMimeType = searchParams.get('contentType');
 
   if (!fileId) {
     return new NextResponse('Missing fileId', { status: 400 });
@@ -21,34 +24,42 @@ export async function GET(req: NextRequest) {
   try {
     const drive = getOAuth2Client();
 
-    // 3. Get Metadata (Filename & MIME)
-    const meta = await drive.files.get({
-        fileId: fileId,
-        fields: 'name, mimeType, size'
-    });
+    let filename = clientFilename;
+    let mimeType = clientMimeType;
+    let size = undefined;
 
-    // 4. Get File Stream
+    // Only fetch metadata if client didn't provide it (Backward compatibility or direct link usage)
+    if (!filename) {
+        const meta = await drive.files.get({
+            fileId: fileId,
+            fields: 'name, mimeType, size'
+        });
+        filename = meta.data.name;
+        mimeType = meta.data.mimeType;
+        size = meta.data.size;
+    }
+
+    // 3. Get File Stream
     const response = await drive.files.get(
       { fileId: fileId, alt: 'media' },
       { responseType: 'stream' }
     );
 
-    // 5. Create Response
+    // 4. Create Response
     const headers = new Headers();
-    headers.set('Content-Type', meta.data.mimeType || 'application/octet-stream');
+    headers.set('Content-Type', mimeType || 'application/octet-stream');
     
     // Force download with correct filename
-    const filename = encodeURIComponent(meta.data.name || 'download');
-    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    const encodedFilename = encodeURIComponent(filename || 'download');
+    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
     
-    if (meta.data.size) {
-        headers.set('Content-Length', meta.data.size);
+    if (size) {
+        headers.set('Content-Length', String(size));
     }
 
     // Convert Node stream to Web stream for Next.js
-    const stream = response.data as any; // Cast because googleapis types vs web streams mismatch
+    const stream = response.data as any; 
     
-    // Create a ReadableStream from the Node stream
     const webStream = new ReadableStream({
         start(controller) {
             stream.on('data', (chunk: any) => controller.enqueue(chunk));

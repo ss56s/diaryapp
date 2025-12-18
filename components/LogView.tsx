@@ -15,7 +15,6 @@ interface LogViewProps {
 // Helper for File Icons
 const getFileIcon = (mimeType: string) => {
   if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
-  // Check specific formats BEFORE generic 'document' which Word claims
   if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
   if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
   if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('tar') || mimeType.includes('rar')) return 'fa-file-zipper text-amber-500';
@@ -24,32 +23,20 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
-// Helper to generate download URL
-const getDownloadUrl = (url: string) => {
-  if (!url) return '';
+// Helper to extract File ID
+const getDriveFileId = (url: string) => {
+  if (!url || !url.includes('drive.google.com')) return null;
   try {
-    // Check if it looks like a Google Drive URL
-    let fileId = null;
-    if (url.includes('drive.google.com')) {
-      // Case 1: /file/d/ID/view
-      const pathMatch = url.match(/\/d\/([^/]+)/);
-      if (pathMatch && pathMatch[1]) fileId = pathMatch[1];
-      
-      // Case 2: id=ID query param
-      if (!fileId && url.includes('id=')) {
-        const urlObj = new URL(url);
-        fileId = urlObj.searchParams.get('id');
-      }
-    }
-
-    // Use our internal proxy for speed and to avoid redirects/auth issues
-    if (fileId) {
-        return `/api/proxy-download?fileId=${fileId}`;
+    const pathMatch = url.match(/\/d\/([^/]+)/);
+    if (pathMatch && pathMatch[1]) return pathMatch[1];
+    if (url.includes('id=')) {
+      const urlObj = new URL(url);
+      return urlObj.searchParams.get('id');
     }
   } catch (e) {
     console.error("URL parse error", e);
   }
-  return url;
+  return null;
 };
 
 const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, onImageClick }) => {
@@ -71,6 +58,9 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
 
+  // New state to track downloading file
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+
   const todayStr = new Date().toISOString().split('T')[0];
   const isFuture = selectedDate > todayStr;
 
@@ -88,7 +78,48 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     }
   }, [items, selectedDate]);
 
-  // Handle Full Sync (Pull + Push Updates + Push Deletes)
+  // Handle Download Logic
+  const handleDownload = async (att: Attachment) => {
+    if (downloadingId) return; // Prevent multiple downloads
+
+    const fileId = getDriveFileId(att.url);
+    if (!fileId) {
+       // Not a Drive URL, just open it
+       window.open(att.url, '_blank');
+       return;
+    }
+
+    setDownloadingId(att.id);
+    try {
+      // Pass filename and mimeType to skip backend metadata fetch (Speed Optimization)
+      const apiUrl = `/api/proxy-download?fileId=${fileId}&filename=${encodeURIComponent(att.name)}&contentType=${encodeURIComponent(att.type)}`;
+      
+      const response = await fetch(apiUrl);
+      if (!response.ok) throw new Error("下载请求失败");
+
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = att.name;
+      document.body.appendChild(a);
+      a.click();
+      
+      // Cleanup
+      setTimeout(() => {
+        window.URL.revokeObjectURL(blobUrl);
+        document.body.removeChild(a);
+      }, 100);
+
+    } catch (error) {
+      console.error("Download failed:", error);
+      alert("下载失败，请重试");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
   const handleFullSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
@@ -96,7 +127,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     try {
       const pendingDeletes = getPendingDeletes();
       if (pendingDeletes.length > 0) {
-        console.log(`[Sync] Processing ${pendingDeletes.length} deletions...`);
         for (const deleteId of pendingDeletes) {
            const res = await deleteLogAction(selectedDate, deleteId);
            if (res.success || res.message === '删除失败') { 
@@ -107,33 +137,23 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
       const pullRes = await pullLogsFromDriveAction(selectedDate);
       if (pullRes.success && pullRes.items) {
-        // Pass selectedDate to enable pruning of locally deleted files
         upsertTimelineItems(pullRes.items, selectedDate);
-      } else if (!pullRes.success && pullRes.message) {
-         console.warn("Pull failed:", pullRes.message);
       }
 
       const currentItems = getItemsByDate(selectedDate);
       const pendingItems = currentItems.filter(i => i.syncStatus !== 'synced');
       
       let failCount = 0;
-      let lastError = "";
-
       for (const item of pendingItems) {
         const res = await syncLogAction(item);
         if (res.success && res.syncedItem) {
           await saveTimelineItem(res.syncedItem);
         } else {
           failCount++;
-          lastError = res.message || "未知错误";
           await saveTimelineItem({ ...item, syncStatus: 'error' });
         }
       }
       
-      if (failCount > 0) {
-        alert(`同步失败 (${failCount}条): ${lastError}\n请检查网络或Google Drive授权配置。`);
-      }
-
       refreshItems();
     } catch (err: any) {
       console.error("Sync error:", err);
@@ -143,7 +163,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     }
   };
 
-  // Keyboard/Viewport Logic (Retained as per existing file state)
   const [isKeyboardDetected, setIsKeyboardDetected] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [initialWindowHeight, setInitialWindowHeight] = useState(0);
@@ -321,25 +340,28 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                                   </div>
                                 );
                               } else {
-                                // Render Non-Image File (Click to Download)
+                                const isDownloading = downloadingId === att.id;
                                 return (
-                                  <a 
+                                  <div 
                                     key={att.id} 
-                                    href={getDownloadUrl(att.url)} 
-                                    // Remove target="_blank" so the browser stays in context 
-                                    // while the API returns "Content-Disposition: attachment"
-                                    download 
-                                    className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 hover:bg-slate-100 transition-colors cursor-pointer group"
+                                    onClick={() => handleDownload(att)}
+                                    className={`flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200 transition-colors cursor-pointer group ${isDownloading ? 'opacity-80 pointer-events-none' : 'hover:bg-slate-100'}`}
                                   >
                                     <div className="w-10 h-10 rounded-lg bg-white shadow-sm flex items-center justify-center flex-shrink-0 group-hover:scale-110 transition-transform">
-                                       <i className={`fa-solid ${getFileIcon(att.type)} text-xl`}></i>
+                                       {isDownloading ? (
+                                          <i className="fa-solid fa-circle-notch fa-spin text-primary text-lg"></i>
+                                       ) : (
+                                          <i className={`fa-solid ${getFileIcon(att.type)} text-xl`}></i>
+                                       )}
                                     </div>
                                     <div className="min-w-0 flex-1">
                                       <p className="text-xs font-bold text-textMain truncate">{att.name}</p>
-                                      <p className="text-[10px] text-textMuted uppercase">{att.name.split('.').pop() || 'FILE'}</p>
+                                      <p className="text-[10px] text-textMuted uppercase">
+                                        {isDownloading ? '下载中...' : (att.name.split('.').pop() || 'FILE')}
+                                      </p>
                                     </div>
-                                    <i className="fa-solid fa-download text-xs text-slate-300"></i>
-                                  </a>
+                                    {!isDownloading && <i className="fa-solid fa-download text-xs text-slate-300"></i>}
+                                  </div>
                                 );
                               }
                             })}
@@ -358,6 +380,7 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
       </div>
 
       <div id="sticky-input-bar" className={`fixed left-4 right-4 z-40 max-w-lg mx-auto transition-all duration-100 ease-out ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} ${showKeyboardLayout ? 'bottom-[150px] pb-2' : 'bottom-[100px]'}`}>
+        {/* ... (Existing input code) ... */}
         <div id="loading-badge" className={`absolute -top-8 left-4 bg-black text-white text-xs py-1 px-3 rounded-full shadow-md z-50 ${isProcessingFile ? 'block' : 'hidden'}`}>
            <i className="fa-solid fa-circle-notch fa-spin mr-1.5"></i> 文件处理中...
         </div>

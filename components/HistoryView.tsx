@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { getAllTimelineItems, deleteTimelineItem, removePendingDelete } from '../services/storageService';
 import { deleteLogAction } from '../app/actions';
 import ConfirmModal from './ConfirmModal';
-import { TimelineItem, CategoryType, CATEGORIES, Attachment } from '../types';
+import { TimelineItem, CategoryType, CATEGORIES } from '../types';
 
 const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
@@ -13,6 +13,7 @@ interface HistoryViewProps {
 
 const getFileIcon = (mimeType: string) => {
   if (mimeType.includes('pdf')) return 'fa-file-pdf text-red-500';
+  // Check specific formats BEFORE generic 'document'
   if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) return 'fa-file-powerpoint text-orange-500';
   if (mimeType.includes('excel') || mimeType.includes('sheet') || mimeType.includes('csv')) return 'fa-file-excel text-emerald-500';
   if (mimeType.includes('zip') || mimeType.includes('compressed') || mimeType.includes('tar') || mimeType.includes('rar')) return 'fa-file-zipper text-amber-500';
@@ -21,19 +22,28 @@ const getFileIcon = (mimeType: string) => {
   return 'fa-file text-slate-400';
 };
 
-const getDriveFileId = (url: string) => {
-  if (!url || !url.includes('drive.google.com')) return null;
+// Helper to generate download URL using internal proxy
+const getDownloadUrl = (url: string) => {
+  if (!url) return '';
   try {
-    const pathMatch = url.match(/\/d\/([^/]+)/);
-    if (pathMatch && pathMatch[1]) return pathMatch[1];
-    if (url.includes('id=')) {
-      const urlObj = new URL(url);
-      return urlObj.searchParams.get('id');
+    let fileId = null;
+    if (url.includes('drive.google.com')) {
+      const pathMatch = url.match(/\/d\/([^/]+)/);
+      if (pathMatch && pathMatch[1]) fileId = pathMatch[1];
+      
+      if (!fileId && url.includes('id=')) {
+        const urlObj = new URL(url);
+        fileId = urlObj.searchParams.get('id');
+      }
+    }
+
+    if (fileId) {
+        return `/api/proxy-download?fileId=${fileId}`;
     }
   } catch (e) {
     console.error("URL parse error", e);
   }
-  return null;
+  return url;
 };
 
 const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
@@ -49,9 +59,6 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [itemToDelete, setItemToDelete] = useState<string | null>(null);
   
-  // Download State
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
-
   // Touch tracking
   const touchStartY = useRef<number | null>(null);
 
@@ -99,7 +106,10 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
 
   const confirmDelete = async () => {
     if (itemToDelete) {
+      // 1. Delete locally (mark as pending)
       await deleteTimelineItem(itemToDelete);
+      
+      // 2. Optimistic remote delete
       const item = items.find(i => i.id === itemToDelete);
       const deleteDate = item ? item.date : selectedDate;
 
@@ -114,30 +124,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
     }
   };
 
-  const handleDownload = async (att: Attachment) => {
-    if (downloadingId) return;
-
-    const fileId = getDriveFileId(att.url);
-    if (!fileId) {
-       window.open(att.url, '_blank');
-       return;
-    }
-
-    setDownloadingId(att.id);
-    const apiUrl = `/api/proxy-download?fileId=${fileId}&filename=${encodeURIComponent(att.name)}&contentType=${encodeURIComponent(att.type)}`;
-    
-    const link = document.createElement('a');
-    link.href = apiUrl;
-    link.style.display = 'none';
-    document.body.appendChild(link);
-    link.click();
-    
-    setTimeout(() => {
-        document.body.removeChild(link);
-        setDownloadingId(null);
-    }, 1500);
-  };
-
+  // --- Gesture Logic ---
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartY.current = e.touches[0].clientY;
   };
@@ -148,11 +135,15 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
     const touchEndY = e.changedTouches[0].clientY;
     const diff = touchEndY - touchStartY.current;
     
+    // Threshold for swipe (30px)
     if (diff < -30) {
+      // Swipe Up -> Collapse
       setIsCalendarExpanded(false);
     } else if (diff > 30) {
+      // Swipe Down -> Expand
       setIsCalendarExpanded(true);
     } else if (Math.abs(diff) < 5) {
+      // Tap -> Toggle (optional fallback)
       setIsCalendarExpanded(!isCalendarExpanded);
     }
     
@@ -350,21 +341,18 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                                />
                              );
                            } else {
-                             const isDownloading = downloadingId === att.id;
                              return (
-                               <div 
+                               <a 
                                  key={att.id} 
-                                 onClick={() => handleDownload(att)}
-                                 className={`w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm transition-colors relative cursor-pointer ${isDownloading ? 'opacity-80 pointer-events-none' : 'hover:bg-slate-100'}`}
+                                 href={getDownloadUrl(att.url)} 
+                                 // Remove target="_blank"
+                                 download 
+                                 className="w-16 h-16 rounded-xl bg-slate-50 border border-slate-100 flex flex-col items-center justify-center gap-1 shadow-sm hover:bg-slate-100 transition-colors relative"
                                >
-                                  <div className="absolute top-1 right-1 text-[8px] text-slate-300">
-                                      {isDownloading ? <i className="fa-solid fa-circle-notch fa-spin text-primary"></i> : <i className="fa-solid fa-download"></i>}
-                                  </div>
+                                  <div className="absolute top-1 right-1 text-[8px] text-slate-300"><i className="fa-solid fa-download"></i></div>
                                   <i className={`fa-solid ${getFileIcon(att.type)} text-xl`}></i>
-                                  <span className="text-[9px] text-textMuted font-bold uppercase truncate w-full text-center px-1">
-                                      {att.name.split('.').pop()}
-                                  </span>
-                               </div>
+                                  <span className="text-[9px] text-textMuted font-bold uppercase truncate w-full text-center px-1">{att.name.split('.').pop()}</span>
+                               </a>
                              );
                            }
                          })}

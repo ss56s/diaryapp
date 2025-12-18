@@ -1,9 +1,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSession } from '@/lib/auth';
-import { getAccessToken } from '@/lib/drive';
-
-export const dynamic = 'force-dynamic';
+import { getOAuth2Client } from '@/lib/drive';
 
 export async function GET(req: NextRequest) {
   // 1. Security Check
@@ -15,54 +13,51 @@ export async function GET(req: NextRequest) {
   // 2. Parse Query
   const { searchParams } = new URL(req.url);
   const fileId = searchParams.get('fileId');
-  const clientFilename = searchParams.get('filename');
-  const clientMimeType = searchParams.get('contentType');
 
   if (!fileId) {
     return new NextResponse('Missing fileId', { status: 400 });
   }
 
   try {
-    // 3. Get raw access token for direct fetch
-    // Using native fetch instead of googleapis library avoids double-buffering 
-    // and stream serialization overhead in Node.js/Edge runtime.
-    const accessToken = await getAccessToken();
-    if (!accessToken) {
-        throw new Error("Failed to obtain access token");
+    const drive = getOAuth2Client();
+
+    // 3. Get Metadata (Filename & MIME)
+    const meta = await drive.files.get({
+        fileId: fileId,
+        fields: 'name, mimeType, size'
+    });
+
+    // 4. Get File Stream
+    const response = await drive.files.get(
+      { fileId: fileId, alt: 'media' },
+      { responseType: 'stream' }
+    );
+
+    // 5. Create Response
+    const headers = new Headers();
+    headers.set('Content-Type', meta.data.mimeType || 'application/octet-stream');
+    
+    // Force download with correct filename
+    const filename = encodeURIComponent(meta.data.name || 'download');
+    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${filename}`);
+    
+    if (meta.data.size) {
+        headers.set('Content-Length', meta.data.size);
     }
 
-    // 4. Direct Fetch from Google API
-    // We request the 'media' alt directly.
-    const googleRes = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
-        method: 'GET',
-        headers: {
-            'Authorization': `Bearer ${accessToken}`
+    // Convert Node stream to Web stream for Next.js
+    const stream = response.data as any; // Cast because googleapis types vs web streams mismatch
+    
+    // Create a ReadableStream from the Node stream
+    const webStream = new ReadableStream({
+        start(controller) {
+            stream.on('data', (chunk: any) => controller.enqueue(chunk));
+            stream.on('end', () => controller.close());
+            stream.on('error', (err: any) => controller.error(err));
         }
     });
 
-    if (!googleRes.ok) {
-        const errorText = await googleRes.text();
-        console.error("Upstream error:", googleRes.status, errorText);
-        throw new Error(`Google Drive API error: ${googleRes.status}`);
-    }
-
-    // 5. Pipe the upstream stream directly to the client
-    // This allows the runtime (Node/Edge) to handle piping at a lower level (C++),
-    // which is significantly faster (MB/s) than JS-based piping (KB/s).
-    const headers = new Headers();
-    headers.set('Content-Type', clientMimeType || googleRes.headers.get('Content-Type') || 'application/octet-stream');
-    
-    // Check upstream length if available
-    const contentLength = googleRes.headers.get('Content-Length');
-    if (contentLength) {
-        headers.set('Content-Length', contentLength);
-    }
-    
-    // Force download with correct filename
-    const encodedFilename = encodeURIComponent(clientFilename || 'download');
-    headers.set('Content-Disposition', `attachment; filename*=UTF-8''${encodedFilename}`);
-
-    return new NextResponse(googleRes.body, { headers });
+    return new NextResponse(webStream, { headers });
 
   } catch (error: any) {
     console.error('Proxy Download Error:', error);

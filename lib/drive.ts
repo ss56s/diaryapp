@@ -38,6 +38,50 @@ const findOrCreateFolder = async (drive: any, parentId: string, folderName: stri
   }
 };
 
+// New Helper to find a file deeply
+const findLogFileId = async (drive: any, username: string, date: string, logId: string) => {
+  try {
+    const rootId = process.env.GOOGLE_DRIVE_ROOT_ID;
+    if (!rootId) return null;
+
+    // Optimization: Instead of traversing folders (slow), search globally by name and ensure it's not trashed
+    // We assume log IDs are unique enough (random string). 
+    // To be safer, we search for the specific filename format.
+    const fileName = `log_${logId}.json`;
+    const q = `name = '${fileName}' and trashed = false`;
+    
+    const res = await drive.files.list({ q, fields: 'files(id, parents)' });
+    
+    if (res.data.files && res.data.files.length > 0) {
+      // Return the first match. 
+      // In a production app, we might verify the parent folder path matches the date, 
+      // but for this scale, name matching is sufficient and much faster.
+      return res.data.files[0].id;
+    }
+    return null;
+  } catch (e) {
+    console.error("Error finding log file:", e);
+    return null;
+  }
+};
+
+export const deleteLogFromDrive = async (username: string, date: string, logId: string) => {
+  const drive = getOAuth2Client();
+  const fileId = await findLogFileId(drive, username, date, logId);
+  
+  if (fileId) {
+    console.log(`[Sync] Deleting file ${fileId} from Drive`);
+    await drive.files.update({
+      fileId: fileId as string,
+      requestBody: { trashed: true }
+    });
+    return true;
+  } else {
+    console.warn(`[Sync] File for log ${logId} not found on Drive, skipping.`);
+    return false;
+  }
+};
+
 export const uploadLogToDrive = async (username: string, log: TimelineItem): Promise<TimelineItem> => {
   console.log(`[Sync] Starting sync for log ${log.id}`);
   const drive = getOAuth2Client();
@@ -56,11 +100,9 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
   const updatedAttachments = [];
 
   if (log.attachments && log.attachments.length > 0) {
-    // Dynamic import to be safe in all environments, though strictly server-side
     const { Readable } = await import('stream');
 
     for (const att of log.attachments) {
-      // Check if it's a Base64 string that needs uploading
       if (att.url.startsWith('data:')) {
         try {
           console.log(`[Sync] Uploading image for attachment ${att.id}`);
@@ -77,14 +119,10 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
               parents: [dayId],
             },
             media: { mimeType: 'image/jpeg', body: stream },
-            // Request thumbnailLink explicitly
             fields: 'id, thumbnailLink, webViewLink' 
           });
           
           if(res.data.id) {
-            // FIX: Use thumbnailLink and modify it to get a larger size (=s2000)
-            // thumbnailLink usually looks like: https://lh3.googleusercontent.com/...?=s220
-            // changing to =s2000 makes it high res and accessible for img tags
             let finalUrl = res.data.thumbnailLink;
             if (finalUrl && finalUrl.includes('=s')) {
                 finalUrl = finalUrl.replace(/=s\d+/, '=s2000');
@@ -100,16 +138,14 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
           }
         } catch (imgErr) {
           console.error("Image upload failed", imgErr);
-          updatedAttachments.push(att); // Keep original (unsynced) if fail
+          updatedAttachments.push(att); 
         }
       } else {
-        // Already a remote URL
         updatedAttachments.push(att);
       }
     }
   }
 
-  // Create the final object to be saved to JSON
   const logToSave = { 
     ...log, 
     attachments: updatedAttachments, 
@@ -118,7 +154,6 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem): Pro
 
   const logContent = JSON.stringify(logToSave, null, 2);
   
-  // Save the JSON file
   const media = {
     mimeType: 'application/json',
     body: logContent

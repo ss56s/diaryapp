@@ -3,8 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import CalendarStrip from './CalendarStrip';
 import ConfirmModal from './ConfirmModal';
 import { TimelineItem, Attachment, CategoryType, CATEGORIES } from '../types';
-import { getItemsByDate, saveTimelineItem, uploadFileMock, deleteTimelineItem, upsertTimelineItems } from '../services/storageService';
-import { syncLogAction, pullLogsFromDriveAction } from '../app/actions';
+import { getItemsByDate, saveTimelineItem, uploadFileMock, deleteTimelineItem, upsertTimelineItems, getPendingDeletes, removePendingDelete } from '../services/storageService';
+import { syncLogAction, pullLogsFromDriveAction, deleteLogAction } from '../app/actions';
 
 interface LogViewProps {
   currentCategory: CategoryType;
@@ -52,22 +52,41 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     }
   }, [items, selectedDate]);
 
-  // Handle Full Sync (Pull + Push)
+  // Handle Full Sync (Pull + Push Updates + Push Deletes)
   const handleFullSync = async () => {
     if (isSyncing) return;
     setIsSyncing(true);
 
     try {
-      // 1. Pull from Drive
+      // 1. Process Pending Deletes First (Clean up Drive)
+      // This prevents "pull" from bringing back things we just deleted if we are online
+      const pendingDeletes = getPendingDeletes();
+      if (pendingDeletes.length > 0) {
+        console.log(`[Sync] Processing ${pendingDeletes.length} deletions...`);
+        for (const deleteId of pendingDeletes) {
+           // We pass selectedDate for optimization, though deleting usually requires finding the file.
+           // Since we don't store the date of deleted items in the simple array, we try current date 
+           // or we rely on the server implementation finding it.
+           // NOTE: Ideally 'pendingDeletes' should be objects {id, date}. 
+           // For now, we attempt to delete. If it's in a different date folder, this simple sync might fail to find it
+           // unless we upgrade storageService. But let's try.
+           const res = await deleteLogAction(selectedDate, deleteId);
+           // If successful or not found, we clear it from pending
+           if (res.success || res.message === '删除失败') { 
+             removePendingDelete(deleteId);
+           }
+        }
+      }
+
+      // 2. Pull from Drive
       const pullRes = await pullLogsFromDriveAction(selectedDate);
       if (pullRes.success && pullRes.items) {
         upsertTimelineItems(pullRes.items);
       } else if (!pullRes.success && pullRes.message) {
          console.warn("Pull failed:", pullRes.message);
-         // Optional: alert("云端拉取失败: " + pullRes.message);
       }
 
-      // 2. Push pending logs
+      // 3. Push pending logs (Updates/Creates)
       const currentItems = getItemsByDate(selectedDate);
       const pendingItems = currentItems.filter(i => i.syncStatus !== 'synced');
       
@@ -76,12 +95,12 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
       for (const item of pendingItems) {
         const res = await syncLogAction(item);
-        if (res.success) {
-          await saveTimelineItem({ ...item, syncStatus: 'synced' });
+        if (res.success && res.syncedItem) {
+          await saveTimelineItem(res.syncedItem);
         } else {
           failCount++;
           lastError = res.message || "未知错误";
-          await saveTimelineItem({ ...item, syncStatus: 'error' }); // Mark as error locally
+          await saveTimelineItem({ ...item, syncStatus: 'error' });
         }
       }
       
@@ -150,10 +169,9 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     setInputText('');
     setAttachments([]);
     
-    // Auto-sync
     syncLogAction(newItem).then(res => {
-      if (res.success) {
-        saveTimelineItem({ ...newItem, syncStatus: 'synced' }).then(() => refreshItems());
+      if (res.success && res.syncedItem) {
+        saveTimelineItem(res.syncedItem).then(() => refreshItems());
       } else {
         saveTimelineItem({ ...newItem, syncStatus: 'error' }).then(() => refreshItems());
       }
@@ -164,7 +182,15 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
 
   const confirmDelete = async () => {
     if (itemToDelete) {
+      // 1. Delete locally (mark as pending delete)
       await deleteTimelineItem(itemToDelete);
+      
+      // 2. Try to delete remotely immediately if possible
+      // (This is best effort. If it fails, the sync logic will catch it later via getPendingDeletes)
+      deleteLogAction(selectedDate, itemToDelete).then(res => {
+         if (res.success) removePendingDelete(itemToDelete);
+      });
+      
       refreshItems();
       setItemToDelete(null);
     }
@@ -193,7 +219,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
     <div className="flex flex-col h-screen bg-background text-textMain relative">
       <CalendarStrip selectedDate={selectedDate} onSelectDate={setSelectedDate} />
 
-      {/* Manual Sync Button - Updated Positioning and Visibility */}
       <button
         onClick={handleFullSync}
         className={`fixed right-5 top-28 z-50 w-12 h-12 rounded-full shadow-lg border-2 border-white flex items-center justify-center transition-all active:scale-95 ${
@@ -206,7 +231,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
         <i className="fa-solid fa-arrows-rotate text-lg"></i>
       </button>
 
-      {/* Feed Area */}
       <div className="flex-1 overflow-y-auto px-5 py-4 pb-40">
         {items.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-[60vh] text-textMuted/60">
@@ -236,7 +260,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                         </span>
                       )}
                     </div>
-                    {/* Sync Status Traffic Light */}
                     <div className="flex items-center gap-1.5 pr-1" title={isSynced ? "已同步" : isError ? "同步失败(点击重试)" : "等待同步"}>
                        <button 
                          onClick={() => isError ? handleFullSync() : null}
@@ -257,7 +280,16 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
                           <div className="mt-3 grid grid-cols-2 gap-2">
                             {item.attachments.map(att => (
                               <div key={att.id} className="relative aspect-video rounded-xl overflow-hidden shadow-sm cursor-zoom-in active:scale-95 transition-transform" onClick={() => onImageClick(att.url)}>
-                                 <img src={att.url} className="w-full h-full object-cover" alt="attachment" />
+                                 <img 
+                                   src={att.url} 
+                                   className="w-full h-full object-cover" 
+                                   alt="attachment" 
+                                   onError={(e) => {
+                                      const t = e.target as HTMLImageElement;
+                                      t.style.display='none';
+                                      t.parentElement!.innerHTML = `<div class="w-full h-full flex items-center justify-center bg-slate-50 text-xs text-slate-400 p-2 text-center"><i class="fa-solid fa-image mr-1"></i>图片已同步</div>`;
+                                   }}
+                                 />
                               </div>
                             ))}
                           </div>
@@ -274,7 +306,6 @@ const LogView: React.FC<LogViewProps> = ({ currentCategory, onCategoryChange, on
         )}
       </div>
 
-      {/* Input Bar */}
       <div id="sticky-input-bar" className={`fixed left-4 right-4 z-40 max-w-lg mx-auto transition-all duration-100 ease-out ${isFuture ? 'opacity-50 pointer-events-none grayscale' : 'opacity-100'} ${showKeyboardLayout ? 'bottom-[150px] pb-2' : 'bottom-[100px]'}`}>
         <div id="loading-badge" className={`absolute -top-8 left-4 bg-black text-white text-xs py-1 px-3 rounded-full shadow-md z-50 ${isProcessingFile ? 'block' : 'hidden'}`}>📸 图片处理中...</div>
         <input type="file" ref={cameraInputRef} className="hidden" accept="image/*" capture="environment" onChange={handleFileUpload} />

@@ -3,7 +3,7 @@
 
 import { cookies } from 'next/headers';
 import { encrypt, getSession } from '../lib/auth';
-import { uploadLogToDrive, fetchLogsByDate } from '../lib/drive';
+import { uploadLogToDrive, fetchLogsByDate, deleteLogFromDrive } from '../lib/drive';
 import { TimelineItem } from '../types';
 
 export async function loginAction(formData: FormData) {
@@ -37,11 +37,24 @@ export async function syncLogAction(logItem: TimelineItem) {
   if (!session) return { success: false, message: '未授权' };
 
   try {
-    await uploadLogToDrive(session.username, logItem);
-    return { success: true };
+    const syncedItem = await uploadLogToDrive(session.username, logItem);
+    return { success: true, syncedItem };
   } catch (error: any) {
     console.error('Google Drive Sync Error:', error);
     return { success: false, message: error?.message || '上传失败' };
+  }
+}
+
+export async function deleteLogAction(date: string, logId: string) {
+  const session = await getSession();
+  if (!session) return { success: false, message: '未授权' };
+
+  try {
+    await deleteLogFromDrive(session.username, date, logId);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Delete Error:', error);
+    return { success: false, message: error?.message || '删除失败' };
   }
 }
 

@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { getAllTimelineItems, deleteTimelineItem } from '../services/storageService';
+import { getAllTimelineItems, deleteTimelineItem, removePendingDelete } from '../services/storageService';
+import { deleteLogAction } from '../app/actions';
 import ConfirmModal from './ConfirmModal';
 import { TimelineItem, CategoryType, CATEGORIES } from '../types';
 
@@ -70,7 +71,20 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
 
   const confirmDelete = async () => {
     if (itemToDelete) {
+      // 1. Delete locally (mark as pending)
       await deleteTimelineItem(itemToDelete);
+      
+      // 2. Optimistic remote delete
+      // We rely on the date of the item for the folder structure in Drive
+      const item = items.find(i => i.id === itemToDelete);
+      const deleteDate = item ? item.date : selectedDate;
+
+      deleteLogAction(deleteDate, itemToDelete).then(res => {
+         if (res.success) {
+           removePendingDelete(itemToDelete);
+         }
+      });
+
       setItems(getAllTimelineItems());
       setItemToDelete(null);
     }
@@ -104,7 +118,7 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
 
   return (
     <div className="flex flex-col h-screen bg-background overflow-hidden">
-      {/* Calendar Header Container - Fixed top part logic */}
+      {/* Calendar Header Container */}
       <div className="flex-shrink-0 bg-surface shadow-soft rounded-b-[2.5rem] z-20 relative flex flex-col transition-all duration-300">
         
         {/* Header (Always Visible) */}
@@ -114,7 +128,6 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
                {viewDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long' })}
                <i className="fa-solid fa-caret-down text-sm text-textMuted"></i>
             </h2>
-            {/* Expanded clickable area for Month Picker */}
             <input 
               type="month" 
               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
@@ -196,17 +209,15 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
           aria-label="Toggle Calendar"
           className="w-full flex flex-col items-center justify-center h-10 hover:bg-slate-50 active:bg-slate-100 transition-colors cursor-grab touch-pan-y relative z-20"
         >
-          {/* Visual Bar */}
           <div className="w-12 h-1 bg-slate-300 rounded-full"></div>
           
-          {/* Animated Chevron Hint */}
           <div className={`text-slate-300 text-[10px] transition-transform duration-300 mt-1 ${isCalendarExpanded ? 'rotate-180' : ''}`}>
              <i className="fa-solid fa-chevron-down"></i>
           </div>
         </div>
       </div>
 
-      {/* Filter Bar (Horizontal) */}
+      {/* Filter Bar */}
       <div className="flex items-center gap-2 px-6 py-3 overflow-x-auto no-scrollbar flex-shrink-0 bg-background/95 backdrop-blur-sm z-10">
         <button
           onClick={() => setFilterCategory('all')}
@@ -234,7 +245,6 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
         ))}
       </div>
 
-      {/* Daily Stream - min-h-0 ensures it shrinks properly when calendar is open */}
       <div className="flex-1 min-h-0 overflow-y-auto px-5 pt-2 pb-32">
         <div className="flex items-center gap-3 mb-6">
            <div className="w-1 h-6 bg-primary rounded-full"></div>
@@ -258,13 +268,11 @@ const HistoryView: React.FC<HistoryViewProps> = ({ onImageClick }) => {
 
               return (
                 <div key={item.id} className="bg-white rounded-2xl p-4 shadow-sm border border-slate-100 animate-slide-up flex gap-3">
-                  {/* Time Column */}
                   <div className="flex flex-col items-center gap-1 pt-0.5 flex-shrink-0 w-12">
                     <span className="text-xs font-bold text-textMuted font-mono">{item.timeLabel}</span>
                     <div className="w-px h-full bg-slate-100 my-1"></div>
                   </div>
                   
-                  {/* Content Column */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2">
                        <div className="flex flex-col gap-1 w-full">

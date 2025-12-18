@@ -3,6 +3,29 @@ import { TimelineItem, Attachment, AIReport } from '../types';
 
 const STORAGE_KEY = 'dailycraft_timeline';
 const REPORTS_KEY = 'dailycraft_ai_reports';
+const DELETED_IDS_KEY = 'dailycraft_deleted_ids';
+
+// --- Deleted Items Management (Tombstones) ---
+export const markLogAsDeleted = (logId: string) => {
+  const deleted = getPendingDeletes();
+  if (!deleted.includes(logId)) {
+    deleted.push(logId);
+    localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(deleted));
+  }
+};
+
+export const getPendingDeletes = (): string[] => {
+  const data = localStorage.getItem(DELETED_IDS_KEY);
+  return data ? JSON.parse(data) : [];
+};
+
+export const removePendingDelete = (logId: string) => {
+  const deleted = getPendingDeletes();
+  const newDeleted = deleted.filter(id => id !== logId);
+  localStorage.setItem(DELETED_IDS_KEY, JSON.stringify(newDeleted));
+};
+
+// --- Timeline Management ---
 
 export const saveTimelineItem = async (item: TimelineItem): Promise<void> => {
   const allItems = getAllTimelineItems();
@@ -22,33 +45,36 @@ export const saveTimelineItem = async (item: TimelineItem): Promise<void> => {
 export const upsertTimelineItems = (remoteItems: TimelineItem[]) => {
   const allItems = getAllTimelineItems();
   const itemMap = new Map(allItems.map(i => [i.id, i]));
-  
+  const deletedIds = getPendingDeletes(); // Get list of items user deleted locally
+
   remoteItems.forEach(remoteItem => {
+    // CRITICAL: If this item is marked as deleted locally, DO NOT restore it.
+    if (deletedIds.includes(remoteItem.id)) {
+      console.log(`[Storage] Ignoring remote item ${remoteItem.id} because it is pending deletion.`);
+      return; 
+    }
+
     const localItem = itemMap.get(remoteItem.id);
     
-    // CRITICAL FIX: Smart Merge Logic
-    // Only overwrite local item if:
-    // 1. It doesn't exist locally (New item from other device), OR
-    // 2. Local item is ALREADY 'synced' (Meaning no local pending changes)
-    // We DO NOT overwrite if local is 'pending' or 'error', because local is newer/unsaved.
-    
+    // Smart Merge: Only overwrite if local is clean or new
     if (!localItem || localItem.syncStatus === 'synced') {
       itemMap.set(remoteItem.id, { ...remoteItem, syncStatus: 'synced' });
-    } else {
-      console.log(`[Storage] Skipping overwrite for pending item ${remoteItem.id}`);
     }
   });
   
-  // Convert back to array and sort
   const mergedItems = Array.from(itemMap.values()).sort((a, b) => b.timestamp - a.timestamp);
-  
   localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedItems));
 };
 
 export const deleteTimelineItem = async (itemId: string): Promise<void> => {
   const allItems = getAllTimelineItems();
   const newItems = allItems.filter(i => i.id !== itemId);
+  
+  // Save new list
   localStorage.setItem(STORAGE_KEY, JSON.stringify(newItems));
+  
+  // Record the ID so we know to delete it from server during sync
+  markLogAsDeleted(itemId);
 };
 
 export const getAllTimelineItems = (): TimelineItem[] => {

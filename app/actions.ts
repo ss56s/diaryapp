@@ -1,4 +1,3 @@
-
 'use server';
 
 import { cookies } from 'next/headers';
@@ -10,11 +9,12 @@ export async function loginAction(formData: FormData) {
   const username = formData.get('username') as string;
   const password = formData.get('password') as string;
 
-  let users = {};
+  // Fix: Explicitly type the users object to allow string indexing
+  let users: Record<string, string> = {};
   try {
     users = JSON.parse(process.env.APP_USERS || '{}');
   } catch (e) {
-    return { success: false, message: 'Server configuration error' };
+    return { success: false, message: '服务器配置错误' };
   }
 
   if (users[username] === password) {

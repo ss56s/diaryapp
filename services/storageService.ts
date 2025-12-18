@@ -19,16 +19,30 @@ export const saveTimelineItem = async (item: TimelineItem): Promise<void> => {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(newItems));
 };
 
-export const upsertTimelineItems = (items: TimelineItem[]) => {
+export const upsertTimelineItems = (remoteItems: TimelineItem[]) => {
   const allItems = getAllTimelineItems();
   const itemMap = new Map(allItems.map(i => [i.id, i]));
   
-  items.forEach(item => {
-    // Only overwrite if remote item exists (naive merge)
-    itemMap.set(item.id, { ...item, syncStatus: 'synced' });
+  remoteItems.forEach(remoteItem => {
+    const localItem = itemMap.get(remoteItem.id);
+    
+    // CRITICAL FIX: Smart Merge Logic
+    // Only overwrite local item if:
+    // 1. It doesn't exist locally (New item from other device), OR
+    // 2. Local item is ALREADY 'synced' (Meaning no local pending changes)
+    // We DO NOT overwrite if local is 'pending' or 'error', because local is newer/unsaved.
+    
+    if (!localItem || localItem.syncStatus === 'synced') {
+      itemMap.set(remoteItem.id, { ...remoteItem, syncStatus: 'synced' });
+    } else {
+      console.log(`[Storage] Skipping overwrite for pending item ${remoteItem.id}`);
+    }
   });
   
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(itemMap.values())));
+  // Convert back to array and sort
+  const mergedItems = Array.from(itemMap.values()).sort((a, b) => b.timestamp - a.timestamp);
+  
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(mergedItems));
 };
 
 export const deleteTimelineItem = async (itemId: string): Promise<void> => {

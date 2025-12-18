@@ -1,7 +1,6 @@
 
 import { google } from 'googleapis';
 import { TimelineItem } from '../types';
-import { Readable } from 'stream';
 import { Buffer } from 'buffer';
 
 const getOAuth2Client = () => {
@@ -39,7 +38,7 @@ const findOrCreateFolder = async (drive: any, parentId: string, folderName: stri
   }
 };
 
-export const uploadLogToDrive = async (username: string, log: TimelineItem) => {
+export const uploadLogToDrive = async (username: string, log: TimelineItem): Promise<TimelineItem> => {
   console.log(`[Sync] Starting sync for log ${log.id}`);
   const drive = getOAuth2Client();
   const rootId = process.env.GOOGLE_DRIVE_ROOT_ID;
@@ -53,75 +52,94 @@ export const uploadLogToDrive = async (username: string, log: TimelineItem) => {
   const monthId = await findOrCreateFolder(drive, yearId, month);
   const dayId = await findOrCreateFolder(drive, monthId, day);
 
-  // Upload Attachments
-  const attachmentLinks = [];
+  // Deep copy attachments
+  const updatedAttachments = [];
+
   if (log.attachments && log.attachments.length > 0) {
+    // Dynamic import to be safe in all environments, though strictly server-side
+    const { Readable } = await import('stream');
+
     for (const att of log.attachments) {
+      // Check if it's a Base64 string that needs uploading
       if (att.url.startsWith('data:')) {
         try {
+          console.log(`[Sync] Uploading image for attachment ${att.id}`);
           const base64Data = att.url.split(',')[1];
           const buffer = Buffer.from(base64Data, 'base64');
           
-          // Use Readable.from if available (Node 10.17+), fallback to push
-          let stream: Readable;
-          if (Readable.from) {
-             stream = Readable.from(buffer);
-          } else {
-             stream = new Readable();
-             stream.push(buffer);
-             stream.push(null);
-          }
+          const stream = new Readable();
+          stream.push(buffer);
+          stream.push(null);
 
           const res = await drive.files.create({
-            requestBody: { name: `img_${log.timestamp}_${att.id}.jpg`, parents: [dayId] },
+            requestBody: { 
+              name: `img_${log.timestamp}_${att.id}.jpg`, 
+              parents: [dayId],
+            },
             media: { mimeType: 'image/jpeg', body: stream },
-            fields: 'id, webViewLink'
+            // Request thumbnailLink explicitly
+            fields: 'id, thumbnailLink, webViewLink' 
           });
           
           if(res.data.id) {
-            // Construct a viewable link (Note: webViewLink might require auth, raw ID is better for app logic but let's store link)
-            attachmentLinks.push({ ...att, driveId: res.data.id, url: res.data.webViewLink || att.url });
+            // FIX: Use thumbnailLink and modify it to get a larger size (=s2000)
+            // thumbnailLink usually looks like: https://lh3.googleusercontent.com/...?=s220
+            // changing to =s2000 makes it high res and accessible for img tags
+            let finalUrl = res.data.thumbnailLink;
+            if (finalUrl && finalUrl.includes('=s')) {
+                finalUrl = finalUrl.replace(/=s\d+/, '=s2000');
+            }
+            
+            updatedAttachments.push({ 
+              ...att, 
+              driveId: res.data.id, 
+              url: finalUrl || res.data.webViewLink || att.url 
+            });
           } else {
-            attachmentLinks.push(att);
+            updatedAttachments.push(att);
           }
         } catch (imgErr) {
           console.error("Image upload failed", imgErr);
-          attachmentLinks.push(att); // Keep original if fail
+          updatedAttachments.push(att); // Keep original (unsynced) if fail
         }
       } else {
-        attachmentLinks.push(att);
+        // Already a remote URL
+        updatedAttachments.push(att);
       }
     }
   }
 
-  const logToSave = { ...log, attachments: attachmentLinks, syncStatus: 'synced' };
+  // Create the final object to be saved to JSON
+  const logToSave = { 
+    ...log, 
+    attachments: updatedAttachments, 
+    syncStatus: 'synced' as const 
+  };
+
   const logContent = JSON.stringify(logToSave, null, 2);
   
-  // Use string directly for body to avoid stream issues for small text files
+  // Save the JSON file
   const media = {
     mimeType: 'application/json',
     body: logContent
   };
 
-  // Check if file already exists (upsert)
   const existingFileQ = `'${dayId}' in parents and name = 'log_${log.id}.json' and trashed = false`;
   const existing = await drive.files.list({ q: existingFileQ, fields: 'files(id)' });
 
   if (existing.data.files && existing.data.files.length > 0 && existing.data.files[0].id) {
-    console.log(`[Sync] Updating existing file ${existing.data.files[0].id}`);
     await drive.files.update({
       fileId: existing.data.files[0].id as string,
       media: media,
     });
   } else {
-    console.log(`[Sync] Creating new file for ${log.id}`);
     await drive.files.create({
       requestBody: { name: `log_${log.id}.json`, parents: [dayId] },
       media: media,
     });
   }
 
-  return true;
+  return logToSave;
 };
 
 export const fetchLogsByDate = async (username: string, date: string): Promise<TimelineItem[]> => {
@@ -134,7 +152,6 @@ export const fetchLogsByDate = async (username: string, date: string): Promise<T
     const userId = await findOrCreateFolder(drive, diaryId, username);
     const [year, month, day] = date.split('-');
     
-    // Helper to find folder without creating
     const findFolderId = async (pId: string, name: string) => {
       const q = `'${pId}' in parents and name = '${name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`;
       const res = await drive.files.list({ q, fields: 'files(id)' });
@@ -168,7 +185,6 @@ export const fetchLogsByDate = async (username: string, date: string): Promise<T
     return items;
   } catch (e) {
     console.error("Fetch Error:", e);
-    // Don't throw, just return empty to allow local offline work
     return [];
   }
 };
